@@ -1,0 +1,96 @@
+# ============================================================
+# FootVision AI — Central Configuration
+# ============================================================
+# All tunable parameters live here.
+# Import in Python with:
+#   import yaml
+#   with open("config/config.yaml") as f:
+#       cfg = yaml.safe_load(f)
+# ============================================================
+
+# ----------------------------------------------------------
+# Paths (relative to project root)
+# ----------------------------------------------------------
+paths:
+  data_raw:       data/raw
+  data_clips:     data/clips
+  data_frames:    data/frames
+  data_annotations: data/annotations
+  data_processed: data/processed
+  models_detection:   models/detection
+  models_tracking:    models/tracking
+  models_calibration: models/calibration
+  outputs:        outputs
+
+# ----------------------------------------------------------
+# Video processing
+# ----------------------------------------------------------
+video:
+  supported_extensions: [".mp4", ".avi", ".mov", ".mkv"]
+  target_fps: 25          # Resample to this FPS during processing (null = keep original)
+  resize_width: null      # Resize input frames (null = keep original)
+  resize_height: null
+
+# ----------------------------------------------------------
+# Object detection
+# ----------------------------------------------------------
+detection:
+  model_name: "yolov8n.pt"          # Default pretrained model (nano = fastest)
+  confidence_threshold: 0.40        # Keep detections above this score
+  iou_threshold: 0.45               # NMS overlap threshold
+  target_classes: ["person"]        # Classes to keep from general detector
+  device: "cuda"                    # "cuda" or "cpu"
+  imgsz: 640                        # Inference image size
+
+# ----------------------------------------------------------
+# Object tracking
+# ----------------------------------------------------------
+tracking:
+  tracker: "bytetrack"
+  track_high_thresh: 0.50
+  track_low_thresh: 0.10
+  new_track_thresh: 0.60
+  track_buffer: 30                  # Frames to keep a lost track alive
+  match_thresh: 0.80
+
+# ----------------------------------------------------------
+# Team classification
+# ----------------------------------------------------------
+teams:
+  n_clusters: 3                     # Team A, Team B, Other (referee/GK)
+  crop_top_ratio: 0.15              # Ignore top % of bbox (head)
+  crop_bottom_ratio: 0.55           # Ignore bottom % of bbox (legs/grass)
+  min_frames_for_vote: 5            # Minimum frames before assigning a team label
+  colour_space: "hsv"               # "rgb", "hsv", or "lab"
+
+# ----------------------------------------------------------
+# Pitch & calibration
+# ----------------------------------------------------------
+calibration:
+  pitch_length_m: 105.0             # Standard pitch length in metres
+  pitch_width_m: 68.0               # Standard pitch width in metres
+  min_keypoints: 4                  # Minimum correspondences for homography
+  calibration_method: "manual"      # "manual" or "auto"
+
+# ----------------------------------------------------------
+# Analytics
+# ----------------------------------------------------------
+analytics:
+  possession_radius_m: 2.0          # Ball-to-player distance threshold for possession
+  possession_min_frames: 5          # Frames team must hold possession before it counts
+  max_player_speed_ms: 12.0         # Realistic top speed (m/s) — flag outliers above this
+  smoothing_window: 5               # Moving-average window for trajectory smoothing
+
+# ----------------------------------------------------------
+# Output
+# ----------------------------------------------------------
+output:
+  annotated_video_suffix: "_annotated"
+  detection_csv_suffix:   "_detections"
+  tracks_csv_suffix:      "_tracks"
+  video_codec: "mp4v"               # FourCC codec for output video
+  draw_bbox: true
+  draw_track_id: true
+  draw_team_label: true
+  draw_confidence: true
+  bbox_thickness: 2
