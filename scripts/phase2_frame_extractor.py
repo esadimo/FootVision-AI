@@ -46,7 +46,7 @@ def inspect_array(frame: np.ndarray, label: str) -> None:
     """
     print(f"\n  [{label}] Array properties:")
     print(f"    frame.shape  = {frame.shape}   # (height, width, channels)")
-    print(f"    frame.dtype  = {frame.dtype}   # uint8 → values 0–255")
+    print(f"    frame.dtype  = {frame.dtype}   # uint8 -> values 0-255")
     print(f"    frame.min()  = {frame.min()}")
     print(f"    frame.max()  = {frame.max()}")
 
@@ -57,7 +57,7 @@ def inspect_array(frame: np.ndarray, label: str) -> None:
 
 def extract_frames(video_path: str, output_dir: str) -> None:
     """
-    Read a video and save selected frames while printing array information.
+    Read a video or image sequence directory and save selected frames while printing array information.
 
     Saved frames
     ------------
@@ -66,32 +66,60 @@ def extract_frames(video_path: str, output_dir: str) -> None:
     frame_every_sec_*.jpg   — one frame per second
     frame_XXXX_last.jpg     — the final frame
     """
+    import os
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Could not open video: {video_path}")
+    is_dir = os.path.isdir(video_path)
+    
+    if is_dir:
+        valid_exts = (".jpg", ".jpeg", ".png", ".bmp")
+        files = sorted([f for f in os.listdir(video_path) if f.lower().endswith(valid_exts)])
+        if not files:
+            raise FileNotFoundError(f"No valid image frames found in directory: {video_path}")
+        total_frames = len(files)
+        # Attempt to read frameRate from parent's seqinfo.ini, else default to 25
+        fps = 25.0
+        parent_dir = os.path.dirname(video_path)
+        seqinfo_path = os.path.join(parent_dir, "seqinfo.ini")
+        if os.path.exists(seqinfo_path):
+            try:
+                with open(seqinfo_path, "r") as f:
+                    for line in f:
+                        if line.startswith("frameRate="):
+                            fps = float(line.split("=")[1].strip())
+                            break
+            except Exception:
+                pass
+        cap = None
+    else:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise FileNotFoundError(f"Could not open video: {video_path}")
+        fps          = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    fps          = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     step         = max(1, int(round(fps)))   # number of frames between "every second" saves
 
-    print(f"\n  Video : {video_path}")
+    print(f"\n  Source: {video_path}")
     print(f"  FPS   : {fps:.2f}  |  Total frames: {total_frames}")
     print(f"  Saving frames to: {output_dir}")
     print()
 
     saved = []
-    frame_idx = 0
-
-    # ----- Task 2.2 — sequential read loop -----
-    while True:
-        ret, frame = cap.read()
+    
+    for frame_idx in range(total_frames):
+        if is_dir:
+            frame_file_path = os.path.join(video_path, files[frame_idx])
+            frame = cv2.imread(frame_file_path)
+            ret = frame is not None
+        else:
+            ret, frame = cap.read()
+            
         if not ret:
-            break   # end of video
+            break
 
         print(f"  Reading frame {frame_idx:5d} / {total_frames - 1}", end="\r")
 
-        # ----- Task 2.3 — save selected frames -----
+        # ----- Tasks 2.3 & 2.4 — save/inspect selected frames -----
 
         # First frame
         if frame_idx == 0:
@@ -110,20 +138,24 @@ def extract_frames(video_path: str, output_dir: str) -> None:
             path = save_frame(frame, output_dir, fname)
             saved.append(path)
 
-        frame_idx += 1
-
     # ----- Save the final frame -----
-    # Re-seek to the last frame
     last_idx = total_frames - 1
-    cap.set(cv2.CAP_PROP_POS_FRAMES, last_idx)
-    ret, last_frame = cap.read()
+    if is_dir:
+        frame_file_path = os.path.join(video_path, files[last_idx])
+        last_frame = cv2.imread(frame_file_path)
+        ret = last_frame is not None
+    else:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, last_idx)
+        ret, last_frame = cap.read()
+        
     if ret:
         fname = f"frame_{last_idx:05d}_last.jpg"
         path = save_frame(last_frame, output_dir, fname)
         saved.append(path)
         inspect_array(last_frame, f"Last frame (index {last_idx})")
 
-    cap.release()
+    if cap is not None:
+        cap.release()
 
     print(f"\n\n  Done. {len(saved)} frames saved to: {output_dir}")
     print()

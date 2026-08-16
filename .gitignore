@@ -25,6 +25,8 @@ ENV/
 # =============================================================================
 # Large data files (never commit raw video or model weights)
 # =============================================================================
+yolov8n.pt
+data/SoccerNet/
 data/raw/*
 data/clips/*
 data/frames/*

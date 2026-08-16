@@ -98,7 +98,7 @@ def draw_demo_shapes(frame: np.ndarray) -> None:
 
 def write_annotated_video(video_path: str, output_path: str) -> None:
     """
-    Read every frame of the input video, draw annotations, and write to output.
+    Read every frame of the input video or directory, draw annotations, and write to output.
 
     OpenCV VideoWriter requires:
         filename   — output path (extension determines container, e.g. .mp4)
@@ -106,15 +106,44 @@ def write_annotated_video(video_path: str, output_path: str) -> None:
         fps        — must match the source to avoid playback speed issues
         frameSize  — (width, height) tuple — must exactly match the frames
     """
+    import os
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Could not open video: {video_path}")
-
-    fps          = cap.get(cv2.CAP_PROP_FPS)
-    width        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    is_dir = os.path.isdir(video_path)
+    
+    if is_dir:
+        valid_exts = (".jpg", ".jpeg", ".png", ".bmp")
+        files = sorted([f for f in os.listdir(video_path) if f.lower().endswith(valid_exts)])
+        if not files:
+            raise FileNotFoundError(f"No valid image frames found in directory: {video_path}")
+        total_frames = len(files)
+        # Attempt to read frameRate from parent's seqinfo.ini, else default to 25
+        fps = 25.0
+        parent_dir = os.path.dirname(video_path)
+        seqinfo_path = os.path.join(parent_dir, "seqinfo.ini")
+        if os.path.exists(seqinfo_path):
+            try:
+                with open(seqinfo_path, "r") as f:
+                    for line in f:
+                        if line.startswith("frameRate="):
+                            fps = float(line.split("=")[1].strip())
+                            break
+            except Exception:
+                pass
+        
+        first_frame_path = os.path.join(video_path, files[0])
+        first_frame = cv2.imread(first_frame_path)
+        if first_frame is None:
+            raise ValueError(f"Could not read first frame: {first_frame_path}")
+        height, width = first_frame.shape[:2]
+        cap = None
+    else:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise FileNotFoundError(f"Could not open video: {video_path}")
+        fps          = cap.get(cv2.CAP_PROP_FPS)
+        width        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Ensure the output directory exists
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -127,9 +156,14 @@ def write_annotated_video(video_path: str, output_path: str) -> None:
     print(f"  Output : {output_path}")
     print()
 
-    frame_idx = 0
-    while True:
-        ret, frame = cap.read()
+    for frame_idx in range(total_frames):
+        if is_dir:
+            frame_file_path = os.path.join(video_path, files[frame_idx])
+            frame = cv2.imread(frame_file_path)
+            ret = frame is not None
+        else:
+            ret, frame = cap.read()
+            
         if not ret:
             break
 
@@ -147,13 +181,12 @@ def write_annotated_video(video_path: str, output_path: str) -> None:
             pct = 100 * frame_idx / max(total_frames - 1, 1)
             print(f"  Writing frame {frame_idx:5d} / {total_frames - 1}  ({pct:.1f}%)", end="\r")
 
-        frame_idx += 1
-
-    cap.release()
+    if cap is not None:
+        cap.release()
     out.release()   # ← CRITICAL: flush and close the video file
 
     print(f"\n\n  Done. Annotated video written to: {output_path}")
-    print(f"  Total frames written: {frame_idx}")
+    print(f"  Total frames written: {total_frames}")
     print()
 
 

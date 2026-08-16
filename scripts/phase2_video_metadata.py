@@ -19,18 +19,58 @@ import cv2
 
 def get_video_metadata(video_path: str) -> dict:
     """
-    Open a video file and return its metadata as a dictionary.
+    Open a video file or an image sequence directory and return its metadata as a dictionary.
 
     Parameters
     ----------
     video_path : str
-        Absolute or relative path to the video file.
+        Absolute or relative path to the video file or directory of image frames.
 
     Returns
     -------
     dict
         Keys: width, height, fps, frame_count, duration_sec, codec
     """
+    import os
+    
+    if os.path.isdir(video_path):
+        # We are dealing with an image sequence directory
+        valid_exts = (".jpg", ".jpeg", ".png", ".bmp")
+        files = sorted([f for f in os.listdir(video_path) if f.lower().endswith(valid_exts)])
+        if not files:
+            raise FileNotFoundError(f"No valid image frames found in directory: {video_path}")
+            
+        first_frame_path = os.path.join(video_path, files[0])
+        first_frame = cv2.imread(first_frame_path)
+        if first_frame is None:
+            raise ValueError(f"Could not read first frame: {first_frame_path}")
+            
+        height, width = first_frame.shape[:2]
+        frame_count = len(files)
+        # Attempt to read frame rate from a parent directory's seqinfo.ini, or default to 25
+        fps = 25.0
+        parent_dir = os.path.dirname(video_path)
+        seqinfo_path = os.path.join(parent_dir, "seqinfo.ini")
+        if os.path.exists(seqinfo_path):
+            try:
+                with open(seqinfo_path, "r") as f:
+                    for line in f:
+                        if line.startswith("frameRate="):
+                            fps = float(line.split("=")[1].strip())
+                            break
+            except Exception:
+                pass
+                
+        duration_sec = frame_count / fps
+        return {
+            "width":        width,
+            "height":       height,
+            "fps":          fps,
+            "frame_count":  frame_count,
+            "duration_sec": duration_sec,
+            "codec":        "IMAGE_SEQ",
+        }
+
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
@@ -47,12 +87,14 @@ def get_video_metadata(video_path: str) -> dict:
 
     # Codec — stored as a float that encodes four ASCII characters (FourCC)
     fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
-    codec = (
-        chr(fourcc_int & 0xFF)
-        + chr((fourcc_int >> 8) & 0xFF)
-        + chr((fourcc_int >> 16) & 0xFF)
-        + chr((fourcc_int >> 24) & 0xFF)
-    )
+    codec = "UNKNOWN"
+    if fourcc_int != 0:
+        codec = (
+            chr(fourcc_int & 0xFF)
+            + chr((fourcc_int >> 8) & 0xFF)
+            + chr((fourcc_int >> 16) & 0xFF)
+            + chr((fourcc_int >> 24) & 0xFF)
+        )
 
     cap.release()
 
