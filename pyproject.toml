@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "footvision-ai"
+version = "0.1.0"
+description = "Automated football match analysis from recorded video"
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+# Discover all packages rooted at the project directory.
+# This makes `src`, `src.video`, `src.detection`, etc. importable.
+where = ["."]
+include = ["src*"]
