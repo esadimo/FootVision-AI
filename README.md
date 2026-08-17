@@ -146,19 +146,21 @@ Build one understandable component at a time, verify its output, then connect it
 
 ## Milestone Roadmap
 
-| # | Milestone | Status |
-|---|---|---|
-| 0 | Project specification | ✅ |
-| 1 | Development environment & structure | ✅ |
-| 2 | Video fundamentals | 🔲 |
-| 3 | Manual bounding-box exercise | 🔲 |
-| 4 | Pretrained person detector | 🔲 |
-| 5 | Detection evaluation | 🔲 |
-| 6 | Short-video detection | 🔲 |
-| 7 | Player tracking | 🔲 |
-| 8 | Team classification | 🔲 |
-| 9 | Pitch calibration | 🔲 |
-| 10 | Possession estimation | 🔲 |
-| 11 | Pass detection | 🔲 |
-| 12 | Statistics & heatmaps | 🔲 |
-| 13 | Dashboard | 🔲 |
+| # | Milestone | Status | Output Deliverable |
+|---|---|---|---|
+| 0 | Project specification | ✅ | [SPEC.md](SPEC.md) |
+| 1 | Development environment & structure | ✅ | Core repo, config schema, modules |
+| 2 | Video fundamentals | ✅ | Metadata inspection, frame extraction, `SNMOT-062_annotated.mp4` |
+| 3 | Manual bounding-box exercise | ✅ | Coordinate math, `outputs/phase3_manual_bbox.jpg` |
+| 4 | Pretrained person detector | ✅ | YOLOv8n inference, multi-threshold study |
+| 5 | Detection evaluation | ✅ | MOT IoU matching: 82.9% Precision, 82.3% Recall |
+| 6 | Short-video detection | ✅ | Full sequence: 13,183 detections @ 9.4 FPS, CSV |
+| 7 | Player tracking | ✅ | ByteTrack IDs, trajectory trails, CSV, 7.9 FPS |
+| 8 | Team classification | ✅ | CIE-LAB K-Means + outlier rejection (Ref/GK), temporal voting |
+| 9 | Pitch calibration & 2D radar | 🔲 | Homography projection, side-by-side tactical radar |
+| 10 | Ball detection & tracking | 🔲 | Dedicated ball pipeline & missing state tracking |
+| 11 | Possession estimation | 🔲 | Ball-to-player proximity & team possession timeline |
+| 12 | Pass detection | 🔲 | Completed passes, turnovers, pass network arrows |
+| 13 | Player & team statistics | 🔲 | Visible distance, team width/depth, heatmaps |
+| 14 | Interactive Dashboard | 🔲 | Streamlit match dashboard |
+
