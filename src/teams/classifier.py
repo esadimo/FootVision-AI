@@ -1,5 +1,6 @@
 """
-src.teams.classifier — Unsupervised team clustering and temporal majority voting.
+src.teams.classifier — Robust team clustering with outlier detection (Referee / Goalkeeper / Other)
+and temporal majority voting per track.
 """
 
 import cv2
@@ -9,96 +10,122 @@ from collections import defaultdict, Counter
 from typing import Dict, List, Optional, Tuple
 
 
-class TeamClassifier:
+class RobustTeamClassifier:
     """
-    Classifies players into Team A, Team B, or Other/Ref by clustering color features,
-    and applies temporal smoothing across each track's history.
+    Classifies players into Team A, Team B, or Other/Ref/GK by clustering 4D LAB+S features
+    with outlier distance rejection and temporal smoothing.
     """
 
-    def __init__(self, n_teams: int = 2, color_space: str = "hsv"):
-        self.n_teams = n_teams
-        self.color_space = color_space
-        self.kmeans: Optional[KMeans] = None
+    def __init__(self, outlier_dist_thresh: float = 0.28):
+        self.outlier_dist_thresh = outlier_dist_thresh
+        self.team_centroids: Dict[str, np.ndarray] = {}
         self.team_colors_bgr: Dict[str, Tuple[int, int, int]] = {
-            "Team A": (0, 0, 255),       # Red
-            "Team B": (255, 255, 255),   # White
-            "Referee": (0, 255, 255),    # Yellow
-            "Unknown": (180, 180, 180)   # Gray
+            "Team A": (220, 220, 220),   # Light default
+            "Team B": (180, 80, 50),     # Dark/Color default
+            "Other": (0, 220, 255),      # Yellow for Ref / GK / Outliers
+            "Unknown": (140, 140, 140)   # Gray
         }
-        # Temporal history buffer: {track_id: [list of instantaneous team predictions]}
+        # Temporal history per track ID: {track_id: [predictions]}
         self.track_history: Dict[int, List[str]] = defaultdict(list)
-        # Resolved stable labels: {track_id: "Team A" / "Team B"}
         self.stable_labels: Dict[int, str] = {}
 
-    def fit(self, features: np.ndarray) -> None:
+    def fit(self, features: np.ndarray, representative_bgrs: np.ndarray) -> None:
         """
-        Fits K-Means clustering on the collected color feature vectors across players.
+        Fits K-Means to discover the two main outfield teams from the feature distribution,
+        and records their centroids.
 
         Parameters
         ----------
-        features : np.ndarray of shape (N, D)
-            Array of dominant color feature vectors extracted from player crops.
+        features : np.ndarray of shape (N, 4)
+            Array of [L_norm, a_norm, b_norm, S_norm] vectors.
+        representative_bgrs : np.ndarray of shape (N, 3)
+            Corresponding median BGR color of each sampled crop.
         """
-        if len(features) < self.n_teams:
-            raise ValueError(f"Need at least {self.n_teams} samples to fit TeamClassifier, got {len(features)}")
+        if len(features) < 10:
+            raise ValueError(f"Need at least 10 feature samples to fit team classifier, got {len(features)}")
 
-        # Fit K-Means with n_teams clusters
-        self.kmeans = KMeans(n_clusters=self.n_teams, n_init=10, random_state=42)
-        self.kmeans.fit(features)
+        # Fit 2 outfield clusters
+        kmeans = KMeans(n_clusters=2, n_init=15, random_state=42)
+        labels = kmeans.fit_predict(features)
+        
+        c0 = kmeans.cluster_centers_[0]
+        c1 = kmeans.cluster_centers_[1]
 
-        # Determine visual BGR representation for each discovered cluster
-        centers = self.kmeans.cluster_centers_
-        if self.color_space == "hsv":
-            for k in range(self.n_teams):
-                hsv_val = np.uint8([[[int(centers[k][0]), int(centers[k][1]), int(centers[k][2])]]])
-                bgr_val = cv2.cvtColor(hsv_val, cv2.COLOR_HSV2BGR)[0][0]
-                team_name = f"Team {'A' if k == 0 else 'B'}"
-                self.team_colors_bgr[team_name] = (int(bgr_val[0]), int(bgr_val[1]), int(bgr_val[2]))
+        # Determine which cluster is lighter (higher L) and assign Team A / Team B consistently
+        if c0[0] >= c1[0]:
+            self.team_centroids["Team A"] = c0
+            self.team_centroids["Team B"] = c1
+            mask_a = (labels == 0)
+            mask_b = (labels == 1)
+        else:
+            self.team_centroids["Team A"] = c1
+            self.team_centroids["Team B"] = c0
+            mask_a = (labels == 1)
+            mask_b = (labels == 0)
+
+        # Average BGR color for clean canvas rendering
+        if np.any(mask_a):
+            bgr_a = np.median(representative_bgrs[mask_a], axis=0).astype(int)
+            self.team_colors_bgr["Team A"] = (int(bgr_a[0]), int(bgr_a[1]), int(bgr_a[2]))
+        if np.any(mask_b):
+            bgr_b = np.median(representative_bgrs[mask_b], axis=0).astype(int)
+            self.team_colors_bgr["Team B"] = (int(bgr_b[0]), int(bgr_b[1]), int(bgr_b[2]))
 
     def predict_single(self, feature: np.ndarray) -> str:
         """
-        Assigns an instantaneous team label for a single player feature vector.
-        """
-        if self.kmeans is None or feature is None:
-            return "Unknown"
-
-        cluster_idx = int(self.kmeans.predict(feature.reshape(1, -1))[0])
-        return f"Team {'A' if cluster_idx == 0 else 'B'}"
-
-    def update_track(self, track_id: int, instantaneous_label: str, min_votes: int = 5) -> str:
-        """
-        Applies temporal majority voting over the history of a track to prevent flickering.
-
-        Parameters
-        ----------
-        track_id : int
-            Unique player track ID.
-        instantaneous_label : str
-            The team predicted on the current frame.
-        min_votes : int
-            Minimum number of frames required before confirming a stable team label.
+        Predicts team membership with outlier rejection.
 
         Returns
         -------
-        str
-            Smoothed stable team label ("Team A", "Team B", or "Unknown").
+        "Team A", "Team B", or "Other" (for Referees, Goalkeepers, or non-matching kits).
         """
-        if instantaneous_label != "Unknown":
-            self.track_history[track_id].append(instantaneous_label)
+        if feature is None or not self.team_centroids:
+            return "Unknown"
+
+        c_a = self.team_centroids["Team A"]
+        c_b = self.team_centroids["Team B"]
+
+        # Weighted Euclidean distance (give high weight to Lightness and Chromaticity)
+        weights = np.array([1.5, 1.2, 1.2, 0.8], dtype=np.float32)
+        
+        dist_a = np.sqrt(np.sum(weights * ((feature - c_a) ** 2)))
+        dist_b = np.sqrt(np.sum(weights * ((feature - c_b) ** 2)))
+
+        min_dist = min(dist_a, dist_b)
+
+        # Outlier rejection: if distance to BOTH team clusters is too large, it's a referee/GK
+        if min_dist > self.outlier_dist_thresh:
+            return "Other"
+
+        # Margin check: if the difference between dist_a and dist_b is too ambiguous
+        if abs(dist_a - dist_b) < 0.04 and min_dist > 0.18:
+            return "Other"
+
+        return "Team A" if dist_a < dist_b else "Team B"
+
+    def update_track(self, track_id: int, instant_label: str, min_votes: int = 5) -> str:
+        """
+        Maintains temporal majority voting per track to eliminate jitter.
+        """
+        if instant_label != "Unknown":
+            self.track_history[track_id].append(instant_label)
 
         history = self.track_history[track_id]
         if len(history) < min_votes:
-            # Fall back to instantaneous if not enough votes yet
-            return instantaneous_label if instantaneous_label != "Unknown" else "Unknown"
+            return instant_label if instant_label != "Unknown" else "Unknown"
 
-        # Majority vote
-        vote_counts = Counter(history)
-        most_common_team, count = vote_counts.most_common(1)[0]
+        # Count votes over the recent 25 frames
+        recent_history = history[-25:]
+        vote_counts = Counter(recent_history)
+        most_common, count = vote_counts.most_common(1)[0]
         
-        # Lock in stable label
-        self.stable_labels[track_id] = most_common_team
-        return most_common_team
+        # If no single category has > 55% majority, mark as ambiguous Other
+        if count / len(recent_history) < 0.55:
+            return "Other"
+
+        self.stable_labels[track_id] = most_common
+        return most_common
 
     def get_color(self, team_label: str) -> Tuple[int, int, int]:
-        """Returns BGR color tuple for rendering the team label on canvas."""
-        return self.team_colors_bgr.get(team_label, (180, 180, 180))
+        """Returns BGR color tuple for drawing."""
+        return self.team_colors_bgr.get(team_label, (140, 140, 140))
