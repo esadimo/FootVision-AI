@@ -324,9 +324,13 @@ Saved to `outputs/SNMOT-062_phase7_tracks.csv`:
 
 ---
 
-## Phase 8: Team Classification Using Jersey Colour
+## Phase 8: Team, Referee & Staff/Goalkeeper Kit Classification
 
-Phase 8 introduces visual feature extraction and clustering to separate tracked players into distinct team memberships (**Team A** and **Team B**) and stabilizes assignments across time with outlier rejection.
+Phase 8 implements multi-class kit and role classification to separate:
+- **Team A**: White / Navy outfield players
+- **Team B**: Green / White outfield players
+- **Referee**: Yellow / Gold uniforms
+- **Staff / Goalkeeper**: Black / Dark attire
 
 ### 8.1 Modular Subsystem Architecture
 
@@ -335,45 +339,51 @@ Phase 8 introduces visual feature extraction and clustering to separate tracked 
                       │
                       ▼
         [ src/teams/crop_extractor.py ]
-        - Torso region cropping (top: 15%, bottom: 55%, side margins: 10%)
-        - Grass pixel segmentation & removal (HSV mask [30, 40, 40] to [85, 255, 255])
+        - Spatial chest cropping (top: 15%, bottom: 50%, side margins: 20%)
+        - Eliminates background pitch & shorts without deleting green jerseys
                       │
-                      ▼ Non-grass jersey pixels
+                      ▼ Chest image patch
        [ src/teams/colour_features.py ]
-        - 4D CIE-LAB + Saturation feature representation: [L, a, b, S]
+        - Extracts LAB (L, a, b) and HSV (H, S, V) median color metrics
                       │
-                      ▼ Feature vector
+                      ▼ Metric Dict {L, a, b, H, S, V}
          [ src/teams/classifier.py ]
-        - Robust K-Means clustering + Outlier Distance Rejection for Ref/GK
-        - Temporal majority voting over sliding track history buffer
+        - Multi-domain boundary decisions:
+          1. Black/Dark Staff/GK check (L < 0.35 or V < 0.30)
+          2. Yellow Referee check (H in [18, 36], b > -a, S >= 0.35)
+          3. Green Team B check (H in [36, 85], -a > b, S >= 0.16)
+          4. White Team A check (L >= 0.55, S < 0.28)
+        - Temporal sliding-window majority voting per track_id
                       │
          ┌────────────┴────────────┐
          ▼                         ▼
-[ Team Color Visual Overlay ]   [ Tabular Dataset Serializer ]
-- Team-colored bounding box     - frame_number, timestamp, track_id
-- Team badge & Track ID banner  - team_label ("Team A", "Team B", "Other")
-- Live team counts in HUD       - Bounding box & pitch foot coordinates
+[ Role-Colored Visual Overlay ]  [ Tabular Dataset Serializer ]
+- Team A: White / Light Gray     - frame_number, timestamp, track_id
+- Team B: Bright Green           - team_label ("Team A", "Team B", "Referee", "Staff/GK")
+- Referee: Bright Yellow/Gold    - confidence, bounding box & feet coordinates
+- Staff/GK: Dark Black/Gray      - CSV output
          │                         │
          ▼                         ▼
 [ outputs/SNMOT-062_phase8_teams.mp4 ]  [ outputs/SNMOT-062_phase8_teams.csv ]
 ```
 
-### 8.2 Torso Cropping & Pitch Grass Filtering
-To avoid jersey color corruption from hair/head or pitch grass:
-1. **Geometric Torso Bounds**:
-   $$y_{\text{top}} = y_1 + 0.15 \cdot h, \quad y_{\text{bottom}} = y_1 + 0.55 \cdot h$$
-   $$x_{\text{left}} = x_1 + 0.10 \cdot w, \quad x_{\text{right}} = x_2 - 0.10 \cdot w$$
-2. **Grass Hue Filtering**:
-   Converts crop to HSV space and applies binary masking on green bounds ($30 \le H \le 85, 40 \le S \le 255, 40 \le V \le 255$), extracting only non-pitch foreground pixels.
+### 8.2 Spatial Chest Extraction (Green Kit Preservation)
+To prevent deleting green jerseys (Team B) while isolating the kit from background pitch grass and dark shorts:
+- **Vertical bounds**: $[y_1 + 0.15h, y_1 + 0.50h]$ (pure upper-chest area, avoiding head and shorts).
+- **Horizontal bounds**: $[x_1 + 0.20w, x_2 - 0.20w]$ (inner 60% chest width, omitting outer background grass).
 
-### 8.3 Feature Space & Outlier Rejection (Referees & Goalkeepers)
-1. **4D CIE-LAB + Saturation**:
-   $$f = \left[\frac{L}{255}, \frac{a - 128}{128}, \frac{b - 128}{128}, \frac{S}{255}\right]$$
-2. **Outlier Rejection**:
-   If minimum weighted Euclidean distance to Team A and Team B centroids exceeds $\tau_{\text{outlier}}$, the player is classified as `Other` (Referee / Goalkeeper / Alternate kit).
-3. **Temporal Smoothing**:
-   Frame-level predictions for track $k$ are pushed into a history buffer $\mathcal{H}_k = [c_1, c_2, \dots, c_t]$. The smoothed team assignment is computed via majority voting:
-   $$\text{Team}(k) = \operatorname{mode}(\mathcal{H}_k)$$
+### 8.3 Chromaticity & Luminance Decision Mechanics
+1. **Staff & Goalkeepers (Black/Dark)**:
+   $$L < 0.35 \quad \lor \quad V < 0.30$$
+2. **Referee (Yellow)**:
+   $$H \in [18, 36], \quad S \ge 0.35, \quad b > -a$$
+   The positive $b$-axis (Yellow) strictly dominates the negative $a$-axis (Green).
+3. **Team B (Green / White)**:
+   $$(H \in [36, 85] \land S \ge 0.16) \quad \lor \quad (a < -0.04 \land S \ge 0.14) \quad \lor \quad (-a > b \land S \ge 0.16)$$
+   The negative $a$-axis (Green) dominates the positive $b$-axis (Yellow).
+4. **Team A (White / Navy)**:
+   $$L \ge 0.55 \quad \land \quad S < 0.28$$
+   Neutral luminance and low saturation.
 
 ### 8.4 Tabular Dataset Schema (`outputs/SNMOT-062_phase8_teams.csv`)
 
@@ -381,8 +391,8 @@ To avoid jersey color corruption from hair/head or pitch grass:
 |---|---|---|
 | `frame_number` | `int` | 1-indexed video frame counter |
 | `timestamp` | `float` | Playback time in seconds |
-| `track_id` | `int` | Persistent object identifier from tracker |
-| `team_label` | `string` | Classified team (`"Team A"`, `"Team B"`, `"Other"`) |
+| `track_id` | `int` | Persistent object identifier from ByteTrack |
+| `team_label` | `string` | Role label (`"Team A"`, `"Team B"`, `"Referee"`, `"Staff/GK"`) |
 | `class_name` | `string` | Object class (`"person"`) |
 | `confidence` | `float` | Detection confidence |
 | `x1, y1, x2, y2` | `int` | Player bounding box coordinates |
@@ -393,3 +403,4 @@ To avoid jersey color corruption from hair/head or pitch grass:
 - `outputs/SNMOT-062_phase8_teams.mp4`
 - `outputs/SNMOT-062_phase8_teams.csv`
 - `outputs/SNMOT-062_phase8_report.txt`
+

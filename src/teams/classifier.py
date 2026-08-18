@@ -1,9 +1,9 @@
 """
-src.teams.classifier — Match-Specific Kit & Role Classifier.
+src.teams.classifier — Match-Specific Kit & Role Classifier with Sharpened Hue-Chromaticity Boundaries.
 Models:
   - Team A: White / Navy Kit (High Lightness, Low Saturation)
-  - Team B: Green / White Kit (Green Hue 38-85, Negative 'a' in LAB, S >= 0.20)
-  - Referee: Yellow Kit (Yellow Hue 20-38, High Saturation S >= 0.40)
+  - Team B: Green / White Kit (Green Hue, Negative 'a' in LAB dominant over 'b')
+  - Referee: Yellow Kit (Yellow Hue, Positive 'b' in LAB dominant over '-a')
   - Goalkeeper / Staff: Black / Dark Clothing (Very Low Lightness L < 0.35)
 """
 
@@ -23,7 +23,7 @@ class MatchKitClassifier:
     def __init__(self):
         self.team_colors_bgr: Dict[str, Tuple[int, int, int]] = {
             "Team A": (240, 240, 240),      # White / Light Gray
-            "Team B": (35, 180, 50),        # Bright Green
+            "Team B": (35, 190, 50),        # Bright Green
             "Referee": (0, 215, 255),       # Bright Yellow / Gold
             "Staff/GK": (45, 45, 45),       # Dark Black / Gray
             "Unknown": (140, 140, 140)
@@ -33,7 +33,7 @@ class MatchKitClassifier:
 
     def predict_single(self, metrics: Optional[Dict[str, float]]) -> str:
         """
-        Classifies an individual player's chest color metrics.
+        Classifies an individual player's chest color metrics with sharp Ref vs Green separation.
 
         Parameters
         ----------
@@ -47,37 +47,37 @@ class MatchKitClassifier:
             return "Unknown"
 
         L = metrics["L"]
-        a = metrics["a"]
-        b = metrics["b"]
-        H = metrics["H"]
+        a = metrics["a"]   # Negative = Green, Positive = Magenta/Red
+        b = metrics["b"]   # Positive = Yellow, Negative = Blue
+        H = metrics["H"]   # OpenCV Hue: 0-180 (Yellow: ~20-35, Green: ~36-85)
         S = metrics["S"]
         V = metrics["V"]
 
-        # 1. Check for Goalkeeper / Sideline Technical Staff (Black / Dark)
+        # 1. Goalkeeper / Sideline Technical Staff (Black / Dark)
         if L < 0.35 or V < 0.30:
             return "Staff/GK"
 
-        # 2. Check for Referee (Yellow / Gold shirt)
-        # Hue between 18 and 38, high saturation S >= 0.38
-        if (18.0 <= H <= 38.0 and S >= 0.35) or (b > 0.30 and S > 0.35):
+        # 2. Referee (Yellow / Gold shirt)
+        # Yellow has strong positive 'b' (yellow axis) that exceeds the green component (-a),
+        # with hue strictly in the yellow-gold range (H <= 36) and high saturation.
+        if (b > 0.20 and b > (-a) and H <= 36.0 and S >= 0.35) or (18.0 <= H <= 34.0 and S >= 0.40):
             return "Referee"
 
-        # 3. Check for Team B (Green / White kit)
-        # Green Hue is between 38 and 85 in OpenCV HSV scale, with clear saturation
-        # In LAB, 'a' is negative for green
-        if (38.0 <= H <= 85.0 and S >= 0.18) or (a < -0.05 and S >= 0.15):
+        # 3. Team B (Green / White kit)
+        # Green has negative 'a' (green axis) where (-a) exceeds yellow 'b', OR Hue in green range (H >= 36)
+        if (H >= 36.0 and H <= 85.0 and S >= 0.16) or (a < -0.04 and S >= 0.14) or ((-a) > b and S >= 0.16):
             return "Team B"
 
-        # 4. Check for Team A (White / Navy kit)
-        # High lightness L > 0.55, low saturation S < 0.28
+        # 4. Team A (White / Navy kit)
+        # Neutral lightness L >= 0.55, low saturation S < 0.28
         if L >= 0.55 and S < 0.28:
             return "Team A"
 
-        # Margin resolver:
+        # Margin Resolver:
         # If there's green chromaticity -> Team B, else White Team A
         if a < -0.03:
             return "Team B"
-        
+
         return "Team A"
 
     def update_track(self, track_id: int, instant_label: str, min_votes: int = 5) -> str:
