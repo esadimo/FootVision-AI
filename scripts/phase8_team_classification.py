@@ -1,19 +1,18 @@
 """
 FootVision AI — Phase 8
-Team, Referee & Goalkeeper Classification Pipeline
+Team, Referee, and Goalkeeper/Staff Classification Pipeline
 
-Objective:
-  1. Fit 4-component kit distributions: Team A (White), Team B (Blue/Secondary), Referee (Yellow), Goalkeeper (Dark).
-  2. Perform full-sequence player tracking using ByteTrack.
-  3. Extract 4D CIE-LAB + Saturation features per player crop.
-  4. Classify each player into Team A, Team B, Referee, or Goalkeeper with temporal track smoothing.
-  5. Export annotated video with distinct team/referee badges, CSV dataset, and performance report.
+Kits Modeled:
+  - Team A: White / Navy Kit
+  - Team B: Green / White Kit
+  - Referee: Yellow / Gold Kit
+  - Staff / GK: Black / Dark Clothing
 
 Usage:
     python scripts/phase8_team_classification.py [options]
 
     --seq_dir      MOT sequence root (default: data/raw/SNMOT-062)
-    --threshold    Detector confidence threshold (default: 0.20)
+    --threshold    Detector confidence cutoff (default: 0.20)
     --output_dir   Output directory (default: outputs/)
     --no_viewer    Run headless without OpenCV popup
     --max_frames   Process only first N frames (0 = all)
@@ -36,8 +35,8 @@ import numpy as np
 from tqdm import tqdm
 
 from src.teams.crop_extractor import extract_torso_crop
-from src.teams.colour_features import extract_player_feature_vector, get_crop_representative_bgr
-from src.teams.classifier import RobustKitClassifier
+from src.teams.colour_features import extract_chest_color_metrics
+from src.teams.classifier import MatchKitClassifier
 
 
 # ─── Visual Rendering Helpers ────────────────────────────────────────────────
@@ -49,7 +48,7 @@ def draw_team_player(frame: np.ndarray,
                      conf: float,
                      team_color: Tuple[int, int, int]) -> None:
     """
-    Renders player bounding box with team/referee badge.
+    Renders player bounding box with distinct team badge.
     """
     # 1. Bounding box
     cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, 2)
@@ -62,7 +61,7 @@ def draw_team_player(frame: np.ndarray,
     banner_y2 = max(th + 8, y1)
     cv2.rectangle(frame, (x1, banner_y1), (x1 + tw + 8, banner_y2), team_color, cv2.FILLED)
     
-    # Text contrast
+    # Text contrast (dark text on bright banners, white text on dark banners)
     brightness = team_color[0] * 0.114 + team_color[1] * 0.587 + team_color[2] * 0.299
     text_color = (0, 0, 0) if brightness > 150 else (255, 255, 255)
     
@@ -82,7 +81,7 @@ def draw_kit_hud(frame: np.ndarray,
                  counts: Dict[str, int],
                  colors: Dict[str, Tuple[int, int, int]],
                  fps: float) -> None:
-    """Draws top HUD telemetry bar showing counts for Team A, Team B, Referees, and GKs."""
+    """Draws top HUD bar showing live counts for Team A, Team B, Referees, and Staff/GKs."""
     h, w = frame.shape[:2]
     cv2.rectangle(frame, (0, 0), (w, 40), (18, 18, 18), cv2.FILLED)
     
@@ -90,78 +89,30 @@ def draw_kit_hud(frame: np.ndarray,
     cv2.putText(frame, info_text, (12, 25),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.50, (220, 220, 220), 1, cv2.LINE_AA)
 
-    # Team A badge
-    bx_a = w - 520
+    # Team A badge (White)
+    bx_a = w - 550
     cv2.circle(frame, (bx_a, 20), 6, colors.get("Team A", (240, 240, 240)), -1)
-    cv2.putText(frame, f"Team A: {counts.get('Team A', 0):2d}", (bx_a + 10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"Team A (White): {counts.get('Team A', 0):2d}", (bx_a + 10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.46, (240, 240, 240), 1, cv2.LINE_AA)
 
-    # Team B badge
+    # Team B badge (Green)
     bx_b = w - 380
-    cv2.circle(frame, (bx_b, 20), 6, colors.get("Team B", (180, 80, 40)), -1)
-    cv2.putText(frame, f"Team B: {counts.get('Team B', 0):2d}", (bx_b + 10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
+    cv2.circle(frame, (bx_b, 20), 6, colors.get("Team B", (35, 180, 50)), -1)
+    cv2.putText(frame, f"Team B (Green): {counts.get('Team B', 0):2d}", (bx_b + 10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.46, (35, 210, 50), 1, cv2.LINE_AA)
 
-    # Ref badge
-    bx_r = w - 240
+    # Ref badge (Yellow)
+    bx_r = w - 220
     cv2.circle(frame, (bx_r, 20), 6, colors.get("Referee", (0, 215, 255)), -1)
     cv2.putText(frame, f"Ref: {counts.get('Referee', 0):2d}", (bx_r + 10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 215, 255), 1, cv2.LINE_AA)
 
-    # GK badge
-    bx_g = w - 120
-    cv2.circle(frame, (bx_g, 20), 6, colors.get("Goalkeeper", (40, 40, 40)), -1)
+    # Staff / GK badge (Black)
+    bx_g = w - 110
+    cv2.circle(frame, (bx_g, 20), 6, colors.get("Staff/GK", (45, 45, 45)), -1)
     cv2.circle(frame, (bx_g, 20), 7, (200, 200, 200), 1)
-    cv2.putText(frame, f"GK: {counts.get('Goalkeeper', 0):2d}", (bx_g + 10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
-
-
-# ─── Calibration Step ─────────────────────────────────────────────────────────
-
-def calibrate_kit_classifier(model,
-                             img_dir: str,
-                             all_files: List[str],
-                             threshold: float,
-                             n_sample_frames: int = 40) -> RobustKitClassifier:
-    """
-    Samples player crops across multiple frames to fit the 4-component kit model.
-    """
-    print(f"  [Calibration] Sampling {n_sample_frames} frames to discover kit color distributions...")
-    
-    sample_indices = np.linspace(0, len(all_files) - 1, min(n_sample_frames, len(all_files)), dtype=int)
-    collected_features = []
-    collected_bgrs = []
-
-    for idx in sample_indices:
-        img_path = os.path.join(img_dir, all_files[idx])
-        frame = cv2.imread(img_path)
-        if frame is None:
-            continue
-
-        results = model(frame, verbose=False, conf=threshold, classes=[0])[0]
-        if results.boxes is None or len(results.boxes) == 0:
-            continue
-
-        for box in results.boxes:
-            coords = box.xyxy[0].cpu().numpy().tolist()
-            x1, y1, x2, y2 = [int(v) for v in coords]
-            
-            torso = extract_torso_crop(frame, (x1, y1, x2, y2))
-            if torso is None:
-                continue
-
-            feat = extract_player_feature_vector(torso)
-            bgr = get_crop_representative_bgr(torso)
-            
-            if feat is not None:
-                collected_features.append(feat)
-                collected_bgrs.append(bgr)
-
-    print(f"  [Calibration] Collected {len(collected_features)} player crop samples.")
-    
-    classifier = RobustKitClassifier()
-    classifier.fit(np.array(collected_features), np.array(collected_bgrs))
-    return classifier
+    cv2.putText(frame, f"Staff/GK: {counts.get('Staff/GK', 0):2d}", (bx_g + 10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.46, (200, 200, 200), 1, cv2.LINE_AA)
 
 
 # ─── Main Pipeline ────────────────────────────────────────────────────────────
@@ -216,22 +167,21 @@ def run_team_classification_pipeline(seq_dir: str,
     ])
 
     print(f"\n{'=' * 75}")
-    print(f"  FootVision AI — Phase 8: Team, Referee & Goalkeeper Classification")
+    print(f"  FootVision AI — Phase 8: Team, Referee & Staff/GK Classification")
     print(f"{'=' * 75}")
     print(f"  Sequence     : {seq_dir}")
     print(f"  Frames       : {total_frames} ({total_frames / fps_src:.1f}s @ {fps_src} fps)")
+    print(f"  Kit Profiles : Team A (White/Navy), Team B (Green/White), Ref (Yellow), Staff/GK (Black)")
     print(f"  Output Video : {video_path}")
     print(f"  Output CSV   : {csv_path}")
 
     model = YOLO("yolov8n.pt")
+    kit_classifier = MatchKitClassifier()
 
-    # Calibrate Kit Classifier (Team A, Team B, Referee, Goalkeeper)
-    kit_classifier = calibrate_kit_classifier(model, img_dir, all_files, threshold, n_sample_frames=40)
-
-    print(f"\n  Starting full sequence tracking, team classification & smoothing...\n")
+    print(f"\n  Starting full sequence tracking & kit classification...\n")
     t_start = time.perf_counter()
 
-    cumulative_counts = {"Team A": 0, "Team B": 0, "Referee": 0, "Goalkeeper": 0, "Unknown": 0}
+    cumulative_counts = {"Team A": 0, "Team B": 0, "Referee": 0, "Staff/GK": 0, "Unknown": 0}
     total_detections = 0
 
     for frame_idx, fname in enumerate(tqdm(all_files, desc="  Classifying", unit="frame")):
@@ -243,7 +193,7 @@ def run_team_classification_pipeline(seq_dir: str,
             continue
         vis = frame.copy()
 
-        # Track with ByteTrack
+        # Track players with ByteTrack
         results = model.track(
             source=frame,
             conf=threshold,
@@ -253,7 +203,7 @@ def run_team_classification_pipeline(seq_dir: str,
             verbose=False
         )[0]
 
-        frame_counts = {"Team A": 0, "Team B": 0, "Referee": 0, "Goalkeeper": 0}
+        frame_counts = {"Team A": 0, "Team B": 0, "Referee": 0, "Staff/GK": 0}
         boxes = results.boxes
 
         if boxes is not None and boxes.id is not None:
@@ -264,17 +214,16 @@ def run_team_classification_pipeline(seq_dir: str,
             for track_id, conf, (x1, y1, x2, y2) in zip(track_ids, confs, xyxys):
                 total_detections += 1
                 
-                # 1. Feature extraction from torso
+                # 1. Extract chest crop & calculate color metrics
                 torso = extract_torso_crop(frame, (x1, y1, x2, y2))
                 instant_label = "Unknown"
                 
                 if torso is not None:
-                    feat = extract_player_feature_vector(torso)
-                    if feat is not None:
-                        instant_label = kit_classifier.predict_single(feat)
+                    metrics = extract_chest_color_metrics(torso)
+                    instant_label = kit_classifier.predict_single(metrics)
 
-                # 2. Temporal smoothing per track
-                stable_label = kit_classifier.update_track(track_id, instant_label, min_votes=4)
+                # 2. Temporal smoothing per track ID
+                stable_label = kit_classifier.update_track(track_id, instant_label, min_votes=3)
                 
                 frame_counts[stable_label] = frame_counts.get(stable_label, 0) + 1
                 cumulative_counts[stable_label] = cumulative_counts.get(stable_label, 0) + 1
@@ -326,16 +275,16 @@ def run_team_classification_pipeline(seq_dir: str,
 
     # ── Summary Report ────────────────────────────────────────────────────
     report_lines = [
-        "FootVision AI — Phase 8 Team, Referee & Goalkeeper Report",
+        "FootVision AI — Phase 8 Kit Classification Report",
         "=" * 65,
         f"Sequence               : {seq_dir}",
         f"Total Frames Processed : {total_frames} ({total_frames / fps_src:.1f} seconds)",
         "",
         "KIT SEPARATION BREAKDOWN",
-        f"  Team A (White Outfield)      : {cumulative_counts['Team A']} instances ({cumulative_counts['Team A']/max(1, total_detections)*100:.1f}%)",
-        f"  Team B (Secondary Outfield)  : {cumulative_counts['Team B']} instances ({cumulative_counts['Team B']/max(1, total_detections)*100:.1f}%)",
-        f"  Referees (Yellow/Gold)       : {cumulative_counts['Referee']} instances ({cumulative_counts['Referee']/max(1, total_detections)*100:.1f}%)",
-        f"  Goalkeepers (Dark)           : {cumulative_counts['Goalkeeper']} instances ({cumulative_counts['Goalkeeper']/max(1, total_detections)*100:.1f}%)",
+        f"  Team A (White / Navy)        : {cumulative_counts['Team A']} instances ({cumulative_counts['Team A']/max(1, total_detections)*100:.1f}%)",
+        f"  Team B (Green / White)       : {cumulative_counts['Team B']} instances ({cumulative_counts['Team B']/max(1, total_detections)*100:.1f}%)",
+        f"  Referees (Yellow)            : {cumulative_counts['Referee']} instances ({cumulative_counts['Referee']/max(1, total_detections)*100:.1f}%)",
+        f"  Staff / Goalkeepers (Black)  : {cumulative_counts['Staff/GK']} instances ({cumulative_counts['Staff/GK']/max(1, total_detections)*100:.1f}%)",
         "",
         "TIMING & SPEED",
         f"  Total Processing Time        : {t_elapsed:.2f} seconds",
@@ -358,7 +307,7 @@ def run_team_classification_pipeline(seq_dir: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Phase 8: 4-Component Kit Classification (Team A, Team B, Referee, Goalkeeper)."
+        description="Phase 8: Accurate Kit & Role Classification (White vs Green vs Ref vs Staff/GK)."
     )
     parser.add_argument("--seq_dir",    default="data/raw/SNMOT-062",
                         help="Path to MOT sequence directory")

@@ -1,140 +1,88 @@
 """
-src.teams.classifier — 4-Component Kit Classifier for Football Analysis.
-Properly separates:
-  - Team A (Primary Outfield Kit)
-  - Team B (Secondary Outfield Kit)
-  - Referee (High-saturation / Bright Yellow kit)
-  - Goalkeeper (Low-luminance / Distinct GK kit)
+src.teams.classifier — Match-Specific Kit & Role Classifier.
+Models:
+  - Team A: White / Navy Kit (High Lightness, Low Saturation)
+  - Team B: Green / White Kit (Green Hue 38-85, Negative 'a' in LAB, S >= 0.20)
+  - Referee: Yellow Kit (Yellow Hue 20-38, High Saturation S >= 0.40)
+  - Goalkeeper / Staff: Black / Dark Clothing (Very Low Lightness L < 0.35)
 """
 
 import cv2
 import numpy as np
-from sklearn.cluster import KMeans
 from collections import defaultdict, Counter
 from typing import Dict, List, Optional, Tuple
 
 
-class RobustKitClassifier:
+class MatchKitClassifier:
     """
-    Classifies players into Team A, Team B, Referee, or Goalkeeper using 4-component
-    clustering with domain-informed heuristics and temporal track smoothing.
+    Classifies players into Team A (White), Team B (Green), Referee (Yellow),
+    or Goalkeeper/Staff (Black) using chromaticity and luminance rules,
+    combined with temporal track smoothing.
     """
 
     def __init__(self):
-        self.team_centroids: Dict[str, np.ndarray] = {}
         self.team_colors_bgr: Dict[str, Tuple[int, int, int]] = {
-            "Team A": (240, 240, 240),   # White (Team A)
-            "Team B": (180, 80, 40),     # Dark Blue/Colored (Team B)
-            "Referee": (0, 215, 255),    # Yellow/Gold (Referee)
-            "Goalkeeper": (40, 40, 40),  # Dark Gray/Black (Goalkeeper)
-            "Other": (0, 215, 255),
+            "Team A": (240, 240, 240),      # White / Light Gray
+            "Team B": (35, 180, 50),        # Bright Green
+            "Referee": (0, 215, 255),       # Bright Yellow / Gold
+            "Staff/GK": (45, 45, 45),       # Dark Black / Gray
             "Unknown": (140, 140, 140)
         }
         self.track_history: Dict[int, List[str]] = defaultdict(list)
         self.stable_labels: Dict[int, str] = {}
 
-    def fit(self, features: np.ndarray, representative_bgrs: np.ndarray) -> None:
+    def predict_single(self, metrics: Optional[Dict[str, float]]) -> str:
         """
-        Fits 4-component clustering to separate Team A, Team B, Referee, and Goalkeeper.
+        Classifies an individual player's chest color metrics.
 
         Parameters
         ----------
-        features : np.ndarray of shape (N, 4)
-            [L_norm, a_norm, b_norm, S_norm] vectors.
-        representative_bgrs : np.ndarray of shape (N, 3)
-            Median BGR color for each sampled crop.
+        metrics : dict with keys 'L', 'a', 'b', 'H', 'S', 'V'
+
+        Returns
+        -------
+        'Team A', 'Team B', 'Referee', 'Staff/GK', or 'Unknown'
         """
-        if len(features) < 20:
-            raise ValueError(f"Need at least 20 crop samples to fit kit classifier, got {len(features)}")
-
-        # Fit 4 clusters
-        kmeans = KMeans(n_clusters=4, n_init=20, random_state=42)
-        labels = kmeans.fit_predict(features)
-        centers = kmeans.cluster_centers_
-
-        # Classify each discovered cluster centroid based on domain properties:
-        # L = centers[:, 0], a = centers[:, 1], b = centers[:, 2], S = centers[:, 3]
-        cluster_roles = {}
-        outfield_candidates = []
-
-        for k in range(4):
-            L, a, b, S = centers[k]
-            
-            # 1. Referee: High saturation (S > 0.50) or strong yellow chromaticity (b > 0.30)
-            if S > 0.50 or b > 0.30:
-                cluster_roles[k] = "Referee"
-            # 2. Goalkeeper / Extreme Dark: Very low luminance (L < 0.30)
-            elif L < 0.30:
-                cluster_roles[k] = "Goalkeeper"
-            else:
-                outfield_candidates.append(k)
-
-        # If we didn't identify exactly 2 outfield candidates, fallback by sorting by L
-        if len(outfield_candidates) != 2:
-            sorted_by_L = sorted(range(4), key=lambda k: centers[k][0], reverse=True)
-            # Two highest L non-referee clusters are outfield teams
-            non_ref = [k for k in sorted_by_L if cluster_roles.get(k) != "Referee"]
-            if len(non_ref) >= 2:
-                outfield_candidates = non_ref[:2]
-            else:
-                outfield_candidates = sorted_by_L[:2]
-
-        # The lighter outfield cluster is Team A (White), the other is Team B
-        c_first, c_second = outfield_candidates[0], outfield_candidates[1]
-        if centers[c_first][0] >= centers[c_second][0]:
-            cluster_roles[c_first] = "Team A"
-            cluster_roles[c_second] = "Team B"
-        else:
-            cluster_roles[c_first] = "Team B"
-            cluster_roles[c_second] = "Team A"
-
-        # Record centroids
-        for k, role in cluster_roles.items():
-            if role in ["Team A", "Team B"]:
-                self.team_centroids[role] = centers[k]
-                mask = (labels == k)
-                if np.any(mask):
-                    bgr_mean = np.median(representative_bgrs[mask], axis=0).astype(int)
-                    self.team_colors_bgr[role] = (int(bgr_mean[0]), int(bgr_mean[1]), int(bgr_mean[2]))
-
-        print(f"  [Kit Classifier Initialized]")
-        print(f"    Team A Centroid (L={self.team_centroids['Team A'][0]:.2f}, S={self.team_centroids['Team A'][3]:.2f}) -> BGR: {self.team_colors_bgr['Team A']}")
-        print(f"    Team B Centroid (L={self.team_centroids['Team B'][0]:.2f}, S={self.team_centroids['Team B'][3]:.2f}) -> BGR: {self.team_colors_bgr['Team B']}")
-
-    def predict_single(self, feature: np.ndarray) -> str:
-        """
-        Classifies an individual player feature vector into:
-          - 'Team A' (Primary outfield kit)
-          - 'Team B' (Secondary outfield kit)
-          - 'Referee' (Referees with yellow/gold/distinct colors)
-          - 'Goalkeeper' (Goalkeepers with dark/distinct kit)
-        """
-        if feature is None or not self.team_centroids:
+        if metrics is None:
             return "Unknown"
 
-        L, a, b, S = feature
+        L = metrics["L"]
+        a = metrics["a"]
+        b = metrics["b"]
+        H = metrics["H"]
+        S = metrics["S"]
+        V = metrics["V"]
 
-        # 1. Rule-based Referee detection (High saturation / Yellow-orange chromaticity)
-        if S > 0.50 or (b > 0.25 and S > 0.35):
+        # 1. Check for Goalkeeper / Sideline Technical Staff (Black / Dark)
+        if L < 0.35 or V < 0.30:
+            return "Staff/GK"
+
+        # 2. Check for Referee (Yellow / Gold shirt)
+        # Hue between 18 and 38, high saturation S >= 0.38
+        if (18.0 <= H <= 38.0 and S >= 0.35) or (b > 0.30 and S > 0.35):
             return "Referee"
 
-        # 2. Rule-based Goalkeeper detection (Extremely low lightness)
-        if L < 0.30:
-            return "Goalkeeper"
+        # 3. Check for Team B (Green / White kit)
+        # Green Hue is between 38 and 85 in OpenCV HSV scale, with clear saturation
+        # In LAB, 'a' is negative for green
+        if (38.0 <= H <= 85.0 and S >= 0.18) or (a < -0.05 and S >= 0.15):
+            return "Team B"
 
-        # 3. Outfield Team Assignment (Euclidean distance in weighted LAB+S space)
-        c_a = self.team_centroids["Team A"]
-        c_b = self.team_centroids["Team B"]
+        # 4. Check for Team A (White / Navy kit)
+        # High lightness L > 0.55, low saturation S < 0.28
+        if L >= 0.55 and S < 0.28:
+            return "Team A"
 
-        weights = np.array([2.0, 1.0, 1.0, 1.5], dtype=np.float32)
-        dist_a = np.sqrt(np.sum(weights * ((feature - c_a) ** 2)))
-        dist_b = np.sqrt(np.sum(weights * ((feature - c_b) ** 2)))
-
-        return "Team A" if dist_a <= dist_b else "Team B"
+        # Margin resolver:
+        # If there's green chromaticity -> Team B, else White Team A
+        if a < -0.03:
+            return "Team B"
+        
+        return "Team A"
 
     def update_track(self, track_id: int, instant_label: str, min_votes: int = 5) -> str:
         """
-        Applies temporal smoothing across the track's history to prevent per-frame jitter.
+        Applies temporal sliding-window majority voting over the track's history.
         """
         if instant_label != "Unknown":
             self.track_history[track_id].append(instant_label)
@@ -143,8 +91,8 @@ class RobustKitClassifier:
         if len(history) < min_votes:
             return instant_label if instant_label != "Unknown" else "Unknown"
 
-        # Sliding window majority vote over recent 30 frames
-        recent = history[-30:]
+        # Sliding window over the recent 25 frames
+        recent = history[-25:]
         vote_counts = Counter(recent)
         most_common, _ = vote_counts.most_common(1)[0]
 
@@ -152,5 +100,5 @@ class RobustKitClassifier:
         return most_common
 
     def get_color(self, label: str) -> Tuple[int, int, int]:
-        """Returns the BGR color for canvas rendering."""
-        return self.team_colors_bgr.get(label, (0, 215, 255))
+        """Returns BGR color for canvas rendering."""
+        return self.team_colors_bgr.get(label, (140, 140, 140))
