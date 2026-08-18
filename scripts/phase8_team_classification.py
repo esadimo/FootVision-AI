@@ -1,18 +1,19 @@
 """
 FootVision AI — Phase 8
-Robust Team Classification Using CIE-LAB & Outlier Rejection
+Team, Referee & Goalkeeper Classification Pipeline
 
 Objective:
-  1. Extract robust 4D CIE-LAB + Saturation feature vectors from player torso crops.
-  2. Fit two primary outfield team clusters while rejecting Referees, Goalkeepers, and outliers as 'Other'.
-  3. Apply temporal smoothing per track ID over sliding history windows.
-  4. Output annotated video with team-colored boxes, distinct Referee badges, and CSV data.
+  1. Fit 4-component kit distributions: Team A (White), Team B (Blue/Secondary), Referee (Yellow), Goalkeeper (Dark).
+  2. Perform full-sequence player tracking using ByteTrack.
+  3. Extract 4D CIE-LAB + Saturation features per player crop.
+  4. Classify each player into Team A, Team B, Referee, or Goalkeeper with temporal track smoothing.
+  5. Export annotated video with distinct team/referee badges, CSV dataset, and performance report.
 
 Usage:
     python scripts/phase8_team_classification.py [options]
 
     --seq_dir      MOT sequence root (default: data/raw/SNMOT-062)
-    --threshold    Detector confidence cutoff (default: 0.20)
+    --threshold    Detector confidence threshold (default: 0.20)
     --output_dir   Output directory (default: outputs/)
     --no_viewer    Run headless without OpenCV popup
     --max_frames   Process only first N frames (0 = all)
@@ -36,7 +37,7 @@ from tqdm import tqdm
 
 from src.teams.crop_extractor import extract_torso_crop
 from src.teams.colour_features import extract_player_feature_vector, get_crop_representative_bgr
-from src.teams.classifier import RobustTeamClassifier
+from src.teams.classifier import RobustKitClassifier
 
 
 # ─── Visual Rendering Helpers ────────────────────────────────────────────────
@@ -48,7 +49,7 @@ def draw_team_player(frame: np.ndarray,
                      conf: float,
                      team_color: Tuple[int, int, int]) -> None:
     """
-    Renders player bounding box with team/referee color banner.
+    Renders player bounding box with team/referee badge.
     """
     # 1. Bounding box
     cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, 2)
@@ -61,7 +62,7 @@ def draw_team_player(frame: np.ndarray,
     banner_y2 = max(th + 8, y1)
     cv2.rectangle(frame, (x1, banner_y1), (x1 + tw + 8, banner_y2), team_color, cv2.FILLED)
     
-    # Text contrast (dark text on bright banners, white text on dark banners)
+    # Text contrast
     brightness = team_color[0] * 0.114 + team_color[1] * 0.587 + team_color[2] * 0.299
     text_color = (0, 0, 0) if brightness > 150 else (255, 255, 255)
     
@@ -75,55 +76,55 @@ def draw_team_player(frame: np.ndarray,
     cv2.circle(frame, (bx, by), 5, (255, 255, 255), 1, cv2.LINE_AA)
 
 
-def draw_team_hud(frame: np.ndarray,
-                  frame_number: int,
-                  total_frames: int,
-                  team_a_count: int,
-                  team_b_count: int,
-                  other_count: int,
-                  color_a: Tuple[int, int, int],
-                  color_b: Tuple[int, int, int],
-                  color_other: Tuple[int, int, int],
-                  fps: float) -> None:
-    """Draws HUD bar with live counts."""
+def draw_kit_hud(frame: np.ndarray,
+                 frame_number: int,
+                 total_frames: int,
+                 counts: Dict[str, int],
+                 colors: Dict[str, Tuple[int, int, int]],
+                 fps: float) -> None:
+    """Draws top HUD telemetry bar showing counts for Team A, Team B, Referees, and GKs."""
     h, w = frame.shape[:2]
-    cv2.rectangle(frame, (0, 0), (w, 40), (20, 20, 20), cv2.FILLED)
+    cv2.rectangle(frame, (0, 0), (w, 40), (18, 18, 18), cv2.FILLED)
     
     info_text = f"Frame {frame_number:04d}/{total_frames}  |  Speed: {fps:.1f} fps"
-    cv2.putText(frame, info_text, (14, 26),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.52, (220, 220, 220), 1, cv2.LINE_AA)
+    cv2.putText(frame, info_text, (12, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.50, (220, 220, 220), 1, cv2.LINE_AA)
 
     # Team A badge
-    bx_a = w - 480
-    cv2.circle(frame, (bx_a, 20), 7, color_a, -1)
-    cv2.circle(frame, (bx_a, 20), 8, (255, 255, 255), 1)
-    cv2.putText(frame, f"Team A: {team_a_count:2d}", (bx_a + 12, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 240, 240), 1, cv2.LINE_AA)
+    bx_a = w - 520
+    cv2.circle(frame, (bx_a, 20), 6, colors.get("Team A", (240, 240, 240)), -1)
+    cv2.putText(frame, f"Team A: {counts.get('Team A', 0):2d}", (bx_a + 10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
 
     # Team B badge
-    bx_b = w - 320
-    cv2.circle(frame, (bx_b, 20), 7, color_b, -1)
-    cv2.circle(frame, (bx_b, 20), 8, (255, 255, 255), 1)
-    cv2.putText(frame, f"Team B: {team_b_count:2d}", (bx_b + 12, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 240, 240), 1, cv2.LINE_AA)
+    bx_b = w - 380
+    cv2.circle(frame, (bx_b, 20), 6, colors.get("Team B", (180, 80, 40)), -1)
+    cv2.putText(frame, f"Team B: {counts.get('Team B', 0):2d}", (bx_b + 10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
 
-    # Other / Ref badge
-    bx_o = w - 160
-    cv2.circle(frame, (bx_o, 20), 7, color_other, -1)
-    cv2.circle(frame, (bx_o, 20), 8, (255, 255, 255), 1)
-    cv2.putText(frame, f"Ref/GK: {other_count:2d}", (bx_o + 12, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 240, 240), 1, cv2.LINE_AA)
+    # Ref badge
+    bx_r = w - 240
+    cv2.circle(frame, (bx_r, 20), 6, colors.get("Referee", (0, 215, 255)), -1)
+    cv2.putText(frame, f"Ref: {counts.get('Referee', 0):2d}", (bx_r + 10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
+
+    # GK badge
+    bx_g = w - 120
+    cv2.circle(frame, (bx_g, 20), 6, colors.get("Goalkeeper", (40, 40, 40)), -1)
+    cv2.circle(frame, (bx_g, 20), 7, (200, 200, 200), 1)
+    cv2.putText(frame, f"GK: {counts.get('Goalkeeper', 0):2d}", (bx_g + 10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
 
 
 # ─── Calibration Step ─────────────────────────────────────────────────────────
 
-def calibrate_team_classifier(model,
-                               img_dir: str,
-                               all_files: List[str],
-                               threshold: float,
-                               n_sample_frames: int = 30) -> RobustTeamClassifier:
+def calibrate_kit_classifier(model,
+                             img_dir: str,
+                             all_files: List[str],
+                             threshold: float,
+                             n_sample_frames: int = 40) -> RobustKitClassifier:
     """
-    Samples player crops across multiple frames to fit the 4D LAB+S cluster model.
+    Samples player crops across multiple frames to fit the 4-component kit model.
     """
     print(f"  [Calibration] Sampling {n_sample_frames} frames to discover kit color distributions...")
     
@@ -156,13 +157,10 @@ def calibrate_team_classifier(model,
                 collected_features.append(feat)
                 collected_bgrs.append(bgr)
 
-    print(f"  [Calibration] Collected {len(collected_features)} valid player crop feature vectors.")
+    print(f"  [Calibration] Collected {len(collected_features)} player crop samples.")
     
-    classifier = RobustTeamClassifier(outlier_dist_thresh=0.26)
+    classifier = RobustKitClassifier()
     classifier.fit(np.array(collected_features), np.array(collected_bgrs))
-    
-    print(f"  [Calibration] Discovered Team A Color: {classifier.get_color('Team A')}")
-    print(f"  [Calibration] Discovered Team B Color: {classifier.get_color('Team B')}")
     return classifier
 
 
@@ -177,7 +175,6 @@ def run_team_classification_pipeline(seq_dir: str,
     from ultralytics import YOLO
     from src.visualization.overlays import show_frame, close_all_windows
 
-    # ── Locate Sequence Assets ────────────────────────────────────────────
     img_dir      = os.path.join(seq_dir, "img1")
     seqinfo_path = os.path.join(seq_dir, "seqinfo.ini")
 
@@ -200,14 +197,12 @@ def run_team_classification_pipeline(seq_dir: str,
     first_frame = cv2.imread(os.path.join(img_dir, all_files[0]))
     frame_h, frame_w = first_frame.shape[:2]
 
-    # ── Output Paths ──────────────────────────────────────────────────────
     os.makedirs(output_dir, exist_ok=True)
     seq_name    = os.path.basename(seq_dir.rstrip("/\\"))
     video_path  = os.path.join(output_dir, f"{seq_name}_phase8_teams.mp4")
     csv_path    = os.path.join(output_dir, f"{seq_name}_phase8_teams.csv")
     report_path = os.path.join(output_dir, f"{seq_name}_phase8_report.txt")
 
-    # ── Writers ───────────────────────────────────────────────────────────
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(video_path, fourcc, fps_src, (frame_w, frame_h))
 
@@ -221,26 +216,22 @@ def run_team_classification_pipeline(seq_dir: str,
     ])
 
     print(f"\n{'=' * 75}")
-    print(f"  FootVision AI — Phase 8: Robust Team & Referee Classification")
+    print(f"  FootVision AI — Phase 8: Team, Referee & Goalkeeper Classification")
     print(f"{'=' * 75}")
     print(f"  Sequence     : {seq_dir}")
     print(f"  Frames       : {total_frames} ({total_frames / fps_src:.1f}s @ {fps_src} fps)")
     print(f"  Output Video : {video_path}")
     print(f"  Output CSV   : {csv_path}")
 
-    # Load YOLO detector
     model = YOLO("yolov8n.pt")
 
-    # ── Calibrate Color Clusters ──────────────────────────────────────────
-    team_classifier = calibrate_team_classifier(model, img_dir, all_files, threshold, n_sample_frames=30)
-    color_a     = team_classifier.get_color("Team A")
-    color_b     = team_classifier.get_color("Team B")
-    color_other = team_classifier.get_color("Other")
+    # Calibrate Kit Classifier (Team A, Team B, Referee, Goalkeeper)
+    kit_classifier = calibrate_kit_classifier(model, img_dir, all_files, threshold, n_sample_frames=40)
 
     print(f"\n  Starting full sequence tracking, team classification & smoothing...\n")
     t_start = time.perf_counter()
 
-    team_counts_total = {"Team A": 0, "Team B": 0, "Other": 0, "Unknown": 0}
+    cumulative_counts = {"Team A": 0, "Team B": 0, "Referee": 0, "Goalkeeper": 0, "Unknown": 0}
     total_detections = 0
 
     for frame_idx, fname in enumerate(tqdm(all_files, desc="  Classifying", unit="frame")):
@@ -252,7 +243,7 @@ def run_team_classification_pipeline(seq_dir: str,
             continue
         vis = frame.copy()
 
-        # Run Tracker
+        # Track with ByteTrack
         results = model.track(
             source=frame,
             conf=threshold,
@@ -262,11 +253,9 @@ def run_team_classification_pipeline(seq_dir: str,
             verbose=False
         )[0]
 
-        frame_team_a = 0
-        frame_team_b = 0
-        frame_other  = 0
-
+        frame_counts = {"Team A": 0, "Team B": 0, "Referee": 0, "Goalkeeper": 0}
         boxes = results.boxes
+
         if boxes is not None and boxes.id is not None:
             track_ids = boxes.id.int().cpu().tolist()
             confs     = boxes.conf.cpu().tolist()
@@ -275,29 +264,24 @@ def run_team_classification_pipeline(seq_dir: str,
             for track_id, conf, (x1, y1, x2, y2) in zip(track_ids, confs, xyxys):
                 total_detections += 1
                 
-                # 1. Extract crop and get 4D LAB+S feature
+                # 1. Feature extraction from torso
                 torso = extract_torso_crop(frame, (x1, y1, x2, y2))
                 instant_label = "Unknown"
                 
                 if torso is not None:
                     feat = extract_player_feature_vector(torso)
                     if feat is not None:
-                        instant_label = team_classifier.predict_single(feat)
+                        instant_label = kit_classifier.predict_single(feat)
 
-                # 2. Temporal majority vote per track
-                stable_team = team_classifier.update_track(track_id, instant_label, min_votes=4)
+                # 2. Temporal smoothing per track
+                stable_label = kit_classifier.update_track(track_id, instant_label, min_votes=4)
                 
-                if stable_team == "Team A":
-                    frame_team_a += 1
-                elif stable_team == "Team B":
-                    frame_team_b += 1
-                else:
-                    frame_other += 1
-                team_counts_total[stable_team] += 1
+                frame_counts[stable_label] = frame_counts.get(stable_label, 0) + 1
+                cumulative_counts[stable_label] = cumulative_counts.get(stable_label, 0) + 1
 
-                # 3. Draw on visual frame
-                team_color = team_classifier.get_color(stable_team)
-                draw_team_player(vis, x1, y1, x2, y2, track_id, stable_team, conf, team_color)
+                # 3. Canvas rendering
+                color = kit_classifier.get_color(stable_label)
+                draw_team_player(vis, x1, y1, x2, y2, track_id, stable_label, conf, color)
 
                 # 4. Save CSV record
                 cx = (x1 + x2) / 2.0
@@ -309,7 +293,7 @@ def run_team_classification_pipeline(seq_dir: str,
                     frame_number,
                     f"{timestamp:.3f}",
                     track_id,
-                    stable_team,
+                    stable_label,
                     "person",
                     f"{conf:.4f}",
                     x1, y1, x2, y2,
@@ -320,8 +304,7 @@ def run_team_classification_pipeline(seq_dir: str,
         # ── Draw HUD ──────────────────────────────────────────────────────
         elapsed = time.perf_counter() - t_start
         fps_proc = frame_number / elapsed if elapsed > 0 else 0.0
-        draw_team_hud(vis, frame_number, total_frames, frame_team_a, frame_team_b, frame_other,
-                      color_a, color_b, color_other, fps_proc)
+        draw_kit_hud(vis, frame_number, total_frames, frame_counts, kit_classifier.team_colors_bgr, fps_proc)
 
         # ── Write Video ───────────────────────────────────────────────────
         writer.write(vis)
@@ -343,22 +326,20 @@ def run_team_classification_pipeline(seq_dir: str,
 
     # ── Summary Report ────────────────────────────────────────────────────
     report_lines = [
-        "FootVision AI — Phase 8 Team & Referee Classification Report",
+        "FootVision AI — Phase 8 Team, Referee & Goalkeeper Report",
         "=" * 65,
         f"Sequence               : {seq_dir}",
         f"Total Frames Processed : {total_frames} ({total_frames / fps_src:.1f} seconds)",
         "",
-        "TEAM & REFEREE SEPARATION SUMMARY",
-        f"  Team A Representative Color (BGR) : {color_a}",
-        f"  Team B Representative Color (BGR) : {color_b}",
-        f"  Total Player-Frame Detections     : {total_detections}",
-        f"  Team A Count (Outfield)           : {team_counts_total['Team A']} ({team_counts_total['Team A']/max(1, total_detections)*100:.1f}%)",
-        f"  Team B Count (Outfield)           : {team_counts_total['Team B']} ({team_counts_total['Team B']/max(1, total_detections)*100:.1f}%)",
-        f"  Other / Referees / Goalkeepers    : {team_counts_total['Other']} ({team_counts_total['Other']/max(1, total_detections)*100:.1f}%)",
+        "KIT SEPARATION BREAKDOWN",
+        f"  Team A (White Outfield)      : {cumulative_counts['Team A']} instances ({cumulative_counts['Team A']/max(1, total_detections)*100:.1f}%)",
+        f"  Team B (Secondary Outfield)  : {cumulative_counts['Team B']} instances ({cumulative_counts['Team B']/max(1, total_detections)*100:.1f}%)",
+        f"  Referees (Yellow/Gold)       : {cumulative_counts['Referee']} instances ({cumulative_counts['Referee']/max(1, total_detections)*100:.1f}%)",
+        f"  Goalkeepers (Dark)           : {cumulative_counts['Goalkeeper']} instances ({cumulative_counts['Goalkeeper']/max(1, total_detections)*100:.1f}%)",
         "",
-        "TIMING & PERFORMANCE",
-        f"  Total Processing Time             : {t_elapsed:.2f} seconds",
-        f"  Pipeline Throughput               : {total_frames / t_elapsed:.2f} FPS",
+        "TIMING & SPEED",
+        f"  Total Processing Time        : {t_elapsed:.2f} seconds",
+        f"  Pipeline Speed               : {total_frames / t_elapsed:.2f} FPS",
         "",
         "OUTPUT DELIVERABLES",
         f"  Annotated Video : {video_path}",
@@ -375,11 +356,9 @@ def run_team_classification_pipeline(seq_dir: str,
     print(f"  Summary report saved to: {report_path}\n")
 
 
-# ─── Entry Point ──────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Phase 8: Robust Team & Referee Classification using CIE-LAB and Outlier Rejection."
+        description="Phase 8: 4-Component Kit Classification (Team A, Team B, Referee, Goalkeeper)."
     )
     parser.add_argument("--seq_dir",    default="data/raw/SNMOT-062",
                         help="Path to MOT sequence directory")
