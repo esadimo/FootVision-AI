@@ -67,6 +67,11 @@ PITCH_LANDMARKS = {
     "right_goalarea_top_right":   (105.0, 24.84),
     "right_goalarea_bottom_left": (99.5,  43.16),
     "right_goalarea_bottom_right":(105.0, 43.16),
+    # Center circle intersections with halfway line & axes
+    "center_circle_top":          (52.5,  24.85),
+    "center_circle_bottom":       (52.5,  43.15),
+    "center_circle_left":         (43.35, 34.0),
+    "center_circle_right":        (61.65, 34.0),
     # Penalty spots
     "left_penalty_spot":          (11.0,  34.0),
     "right_penalty_spot":         (94.0,  34.0),
