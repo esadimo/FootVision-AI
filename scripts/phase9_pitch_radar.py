@@ -191,6 +191,12 @@ def main():
                          "foot_x_px", "foot_y_px",
                          "pitch_x_m", "pitch_y_m"])
 
+    # ── Tracking & Smoothing States ───────────────────────────────────────────
+    smoothed_positions = {}  # {track_id: (smoothed_x, smoothed_y)}
+    player_trails      = {}  # {track_id: [(x_m, y_m), ...]}
+    SMOOTHING_ALPHA    = 0.60  # 0.60 responsive, 0.40 historical filter
+    MAX_TRAIL_LEN      = 10
+
     # ── Main Loop ─────────────────────────────────────────────────────────────
     t0 = time.time()
     for fi, fname in enumerate(frames):
@@ -243,24 +249,43 @@ def main():
             if label in label_counts:
                 label_counts[label] += 1
 
-            # Foot coordinate = bottom-center of bounding box
-            foot_x_px = (x1 + x2) // 2
-            foot_y_px = y2
+            # Ground contact foot point refinement (removes ground shadow bias)
+            h_box = y2 - y1
+            foot_x_px = (x1 + x2) / 2.0
+            foot_y_px = y2 - 0.02 * h_box
 
-            # Project to pitch coordinates
-            pitch_x_m, pitch_y_m = project_point(H, float(foot_x_px), float(foot_y_px))
+            # Project to pitch metric coordinates
+            raw_x_m, raw_y_m = project_point(H, float(foot_x_px), float(foot_y_px))
+
+            # Temporal EMA trajectory smoothing (eliminates stride/bounding box jitter)
+            if tid in smoothed_positions:
+                prev_x, prev_y = smoothed_positions[tid]
+                smooth_x = SMOOTHING_ALPHA * raw_x_m + (1.0 - SMOOTHING_ALPHA) * prev_x
+                smooth_y = SMOOTHING_ALPHA * raw_y_m + (1.0 - SMOOTHING_ALPHA) * prev_y
+            else:
+                smooth_x = raw_x_m
+                smooth_y = raw_y_m
+
+            smoothed_positions[tid] = (smooth_x, smooth_y)
+
+            # Update historical movement trails
+            if tid not in player_trails:
+                player_trails[tid] = []
+            player_trails[tid].append((smooth_x, smooth_y))
+            if len(player_trails[tid]) > MAX_TRAIL_LEN:
+                player_trails[tid].pop(0)
 
             # Write to CSV
             csv_writer.writerow([frame_num, f"{timestamp:.4f}", tid, label,
                                   x1, y1, x2, y2,
-                                  foot_x_px, foot_y_px,
-                                  f"{pitch_x_m:.4f}", f"{pitch_y_m:.4f}"])
+                                  f"{foot_x_px:.1f}", f"{foot_y_px:.1f}",
+                                  f"{smooth_x:.4f}", f"{smooth_y:.4f}"])
 
             player_positions.append({
                 "track_id":   tid,
                 "team_label": label,
-                "pitch_x":    pitch_x_m,
-                "pitch_y":    pitch_y_m,
+                "pitch_x":    smooth_x,
+                "pitch_y":    smooth_y,
             })
 
         # ── Build Composite Frame ─────────────────────────────────────────────
@@ -268,7 +293,8 @@ def main():
         broadcast_hud  = draw_broadcast_hud(broadcast_ann, frame_num, timestamp, label_counts)
         radar          = draw_pitch_radar(player_positions,
                                           frame_number=frame_num,
-                                          timestamp=timestamp)
+                                          timestamp=timestamp,
+                                          player_trails=player_trails)
         composite      = build_composite_frame(broadcast_hud, radar, target_height=COMPOSITE_HEIGHT)
 
         if writer is not None:

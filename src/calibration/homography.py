@@ -13,19 +13,21 @@ def compute_homography(
 ) -> np.ndarray:
     """
     Computes the 3x3 homography matrix H that maps image pixel coordinates
-    to real-world pitch metric coordinates using the DLT algorithm.
+    to real-world pitch metric coordinates.
+
+    Uses DLT + Levenberg-Marquardt non-linear optimization for geometric error minimization.
 
     Parameters
     ----------
     image_points : list of (x_px, y_px)
-        Landmark pixel coordinates in the camera frame.
+        Landmark pixel coordinates in the camera frame (native resolution).
     pitch_points : list of (X_m, Y_m)
         Corresponding landmark coordinates in pitch meter space.
 
     Returns
     -------
     H : np.ndarray of shape (3, 3)
-        Homography matrix.
+        Optimized homography matrix.
     """
     if len(image_points) < 4 or len(pitch_points) < 4:
         raise ValueError("At least 4 point correspondences are required for homography computation.")
@@ -35,7 +37,19 @@ def compute_homography(
     src = np.array(image_points, dtype=np.float64)
     dst = np.array(pitch_points, dtype=np.float64)
 
-    H, mask = cv2.findHomography(src, dst, method=cv2.RANSAC, ransacReprojThreshold=5.0)
+    # If exactly 4 points, standard DLT
+    if len(image_points) == 4:
+        H, _ = cv2.findHomography(src, dst, method=0)
+    else:
+        # If > 4 points, use RANSAC with small inlier threshold for robust outlier rejection,
+        # then refine with all inliers using least-squares
+        H, inliers = cv2.findHomography(src, dst, method=cv2.RANSAC, ransacReprojThreshold=3.0)
+        if H is not None and inliers is not None:
+            inlier_mask = inliers.ravel() == 1
+            if np.sum(inlier_mask) >= 4:
+                # Refine with all inliers
+                H, _ = cv2.findHomography(src[inlier_mask], dst[inlier_mask], method=0)
+
     if H is None:
         raise RuntimeError("Homography computation failed. Check that your landmark points are valid.")
     return H

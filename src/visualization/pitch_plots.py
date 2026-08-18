@@ -53,17 +53,18 @@ def draw_pitch_radar(
     canvas_h: int = RADAR_H,
     margin: int = RADAR_MARGIN,
     frame_number: Optional[int] = None,
-    timestamp: Optional[float] = None
+    timestamp: Optional[float] = None,
+    player_trails: Optional[Dict[int, List[Tuple[float, float]]]] = None
 ) -> np.ndarray:
     """
-    Draws the 2D tactical radar frame: top-down pitch with colored player dots.
+    Draws the 2D tactical radar frame: top-down pitch with colored player dots and motion trails.
 
     Parameters
     ----------
     player_positions : list of dicts
         Each dict must have keys:
             'track_id'   : int
-            'team_label' : str (e.g. "Team A", "Team B", "Referee", ...)
+            'team_label' : str
             'pitch_x'    : float (pitch X coordinate in meters)
             'pitch_y'    : float (pitch Y coordinate in meters)
     canvas_w, canvas_h : int
@@ -71,9 +72,9 @@ def draw_pitch_radar(
     margin : int
         Padding in pixels around the radar drawing area.
     frame_number : int, optional
-        Frame number for HUD.
     timestamp : float, optional
-        Timestamp in seconds for HUD.
+    player_trails : dict of {track_id: [(x_m, y_m), ...]}, optional
+        Recent pitch coordinates history for rendering movement trails.
 
     Returns
     -------
@@ -83,7 +84,18 @@ def draw_pitch_radar(
     # Draw base pitch
     radar = draw_pitch(canvas_w, canvas_h, line_thickness=1)
 
-    # Draw player dots
+    # 1. Draw motion trails if provided
+    if player_trails is not None:
+        for tid, trail in player_trails.items():
+            if len(trail) < 2:
+                continue
+            pts = [_meters_to_radar_px(xm, ym, canvas_w, canvas_h, margin) for xm, ym in trail]
+            for i in range(len(pts) - 1):
+                alpha = (i + 1) / len(pts)
+                thickness = 1 if alpha < 0.6 else 2
+                cv2.line(radar, pts[i], pts[i + 1], (180, 180, 180), thickness, cv2.LINE_AA)
+
+    # 2. Draw player dots
     for p in player_positions:
         x_m = p.get("pitch_x", None)
         y_m = p.get("pitch_y", None)
@@ -92,15 +104,15 @@ def draw_pitch_radar(
 
         if x_m is None or y_m is None:
             continue
-        if not (0 <= x_m <= PITCH_LENGTH and 0 <= y_m <= PITCH_WIDTH):
-            continue   # Out of pitch bounds — skip
+        if not (-2.0 <= x_m <= PITCH_LENGTH + 2.0 and -2.0 <= y_m <= PITCH_WIDTH + 2.0):
+            continue   # Out of bounds
 
         px, py = _meters_to_radar_px(x_m, y_m, canvas_w, canvas_h, margin)
         color = TEAM_DOT_COLORS.get(label, TEAM_DOT_COLORS["Unknown"])
 
         # Draw dot with white border
-        cv2.circle(radar, (px, py), DOT_RADIUS + DOT_BORDER, (255, 255, 255), -1)
-        cv2.circle(radar, (px, py), DOT_RADIUS, color, -1)
+        cv2.circle(radar, (px, py), DOT_RADIUS + DOT_BORDER, (255, 255, 255), -1, cv2.LINE_AA)
+        cv2.circle(radar, (px, py), DOT_RADIUS, color, -1, cv2.LINE_AA)
 
         # Track ID label
         cv2.putText(radar, str(tid), (px + DOT_RADIUS + 2, py + 4),
