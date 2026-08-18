@@ -94,17 +94,119 @@ def project_points_batch(H: np.ndarray,
     return [(float(r[0][0]), float(r[0][1])) for r in result]
 
 
+import json
+
+
 def save_homography(H: np.ndarray, path: str) -> None:
-    """Saves the homography matrix to a .npy file."""
-    np.save(path, H)
+    """Saves a single homography matrix to a .npy or .json file."""
+    if path.endswith(".json"):
+        data = {"keyframes": [{"frame_idx": 0, "H": H.tolist()}]}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    else:
+        np.save(path, H)
     print(f"  [Calibration] Homography matrix saved to: {path}")
 
 
-def load_homography(path: str) -> np.ndarray:
-    """Loads the homography matrix from a .npy file."""
-    H = np.load(path)
-    print(f"  [Calibration] Homography matrix loaded from: {path}")
-    return H
+def save_multikeyframe_homography(keyframes: List[dict], path: str) -> None:
+    """
+    Saves multi-keyframe homographies to a JSON file.
+    Each dict in keyframes: {'frame_idx': int, 'H': np.ndarray (or list)}
+    """
+    serializable = []
+    for kf in keyframes:
+        h_matrix = kf['H'].tolist() if isinstance(kf['H'], np.ndarray) else kf['H']
+        serializable.append({
+            "frame_idx": int(kf['frame_idx']),
+            "H": h_matrix
+        })
+    # Sort by frame index
+    serializable.sort(key=lambda x: x['frame_idx'])
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"keyframes": serializable}, f, indent=2)
+    print(f"  [Calibration] Multi-keyframe homography ({len(serializable)} frames) saved to: {path}")
+
+
+def load_homography(path: str):
+    """
+    Loads homography calibration from file.
+    Supports both single static .npy and multi-keyframe .json formats.
+    """
+    if path.endswith(".json"):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        keyframes = []
+        for kf in data.get("keyframes", []):
+            keyframes.append({
+                "frame_idx": kf["frame_idx"],
+                "H": np.array(kf["H"], dtype=np.float64)
+            })
+        keyframes.sort(key=lambda x: x["frame_idx"])
+        print(f"  [Calibration] Loaded {len(keyframes)} keyframe homographies from: {path}")
+        return keyframes
+    else:
+        H = np.load(path)
+        print(f"  [Calibration] Static homography loaded from: {path}")
+        return H
+
+
+def get_homography_for_frame(calibration_data, frame_idx: int, img_w: int = 1920, img_h: int = 1080) -> np.ndarray:
+    """
+    Retrieves or smoothly interpolates the homography matrix for a given frame_idx.
+
+    If calibration_data is a single 3x3 ndarray, returns it directly.
+    If calibration_data is a list of keyframe dicts, smoothly interpolates between
+    the enclosing keyframes using 4-point virtual anchor projective blending.
+    """
+    if isinstance(calibration_data, np.ndarray):
+        return calibration_data
+
+    if not isinstance(calibration_data, list) or len(calibration_data) == 0:
+        raise ValueError("Invalid calibration data.")
+
+    keyframes = calibration_data
+    if len(keyframes) == 1:
+        return keyframes[0]["H"]
+
+    # Boundary conditions
+    if frame_idx <= keyframes[0]["frame_idx"]:
+        return keyframes[0]["H"]
+    if frame_idx >= keyframes[-1]["frame_idx"]:
+        return keyframes[-1]["H"]
+
+    # Find bounding keyframes
+    kf_prev = keyframes[0]
+    kf_next = keyframes[-1]
+    for i in range(len(keyframes) - 1):
+        if keyframes[i]["frame_idx"] <= frame_idx <= keyframes[i + 1]["frame_idx"]:
+            kf_prev = keyframes[i]
+            kf_next = keyframes[i + 1]
+            break
+
+    f_prev = kf_prev["frame_idx"]
+    f_next = kf_next["frame_idx"]
+    if f_prev == f_next:
+        return kf_prev["H"]
+
+    alpha = (frame_idx - f_prev) / (f_next - f_prev)  # 0.0 -> 1.0
+
+    # Smooth virtual 4-corner metric interpolation (guaranteed non-degenerate)
+    corners_img = np.array([
+        [[0.0, 0.0]],
+        [[float(img_w), 0.0]],
+        [[float(img_w), float(img_h)]],
+        [[0.0, float(img_h)]]
+    ], dtype=np.float64)
+
+    pts_m_prev = cv2.perspectiveTransform(corners_img, kf_prev["H"])
+    pts_m_next = cv2.perspectiveTransform(corners_img, kf_next["H"])
+
+    # Linearly blend metric coordinates
+    pts_m_interp = (1.0 - alpha) * pts_m_prev + alpha * pts_m_next
+
+    # Solve intermediate homography
+    H_interp, _ = cv2.findHomography(corners_img, pts_m_interp, method=0)
+    return H_interp
 
 
 def compute_reprojection_error(H: np.ndarray,

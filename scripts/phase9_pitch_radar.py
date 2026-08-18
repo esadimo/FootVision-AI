@@ -117,6 +117,9 @@ def draw_broadcast_hud(frame: np.ndarray,
     return out
 
 
+from src.calibration.homography import load_homography, project_point, get_homography_for_frame
+
+
 # ─── Main Pipeline ────────────────────────────────────────────────────────────
 
 def main():
@@ -126,21 +129,29 @@ def main():
     parser.add_argument("--conf",        type=float, default=CONF_THRESHOLD)
     parser.add_argument("--iou",         type=float, default=IOU_THRESHOLD)
     parser.add_argument("--output_dir",  default="outputs")
-    parser.add_argument("--homography",  default="outputs/homography.npy",
-                        help="Path to saved homography matrix (.npy)")
+    parser.add_argument("--homography",  default=None,
+                        help="Path to homography file (.json for multi-keyframe or .npy)")
     parser.add_argument("--no_viewer",   action="store_true",
                         help="Suppress live preview window")
     parser.add_argument("--skip_video",  action="store_true",
                         help="Skip writing output video (CSV only)")
     args = parser.parse_args()
 
-    # ── Validate Homography ───────────────────────────────────────────────────
-    if not os.path.exists(args.homography):
-        print(f"\n[ERROR] Homography file not found: {args.homography}")
-        print("  Please run 'python scripts/phase9_pick_landmarks.py' first to calibrate.\n")
-        sys.exit(1)
+    # ── Auto-Detect Homography File ───────────────────────────────────────────
+    h_path = args.homography
+    if h_path is None:
+        json_candidate = os.path.join(args.output_dir, "homography_keyframes.json")
+        npy_candidate  = os.path.join(args.output_dir, "homography.npy")
+        if os.path.exists(json_candidate):
+            h_path = json_candidate
+        elif os.path.exists(npy_candidate):
+            h_path = npy_candidate
+        else:
+            print(f"\n[ERROR] No homography calibration found in {args.output_dir}")
+            print("  Please run 'python scripts/phase9_pick_landmarks.py' first to calibrate.\n")
+            sys.exit(1)
 
-    H = load_homography(args.homography)
+    calib_data = load_homography(h_path)
 
     # ── Load Image Sequence ───────────────────────────────────────────────────
     img_dir = os.path.join(args.seq_dir, "img1")
@@ -155,6 +166,7 @@ def main():
     print(f"\n  Phase 9 -- Tactical Radar Mapping")
     print(f"  Sequence : {seq_name}  ({total_frames} frames)")
     print(f"  Model    : {args.model}  | Conf: {args.conf}")
+    print(f"  Calib    : {h_path}")
     print()
 
     # ── Load Model & Classifier ───────────────────────────────────────────────
@@ -194,7 +206,7 @@ def main():
     # ── Tracking & Smoothing States ───────────────────────────────────────────
     smoothed_positions = {}  # {track_id: (smoothed_x, smoothed_y)}
     player_trails      = {}  # {track_id: [(x_m, y_m), ...]}
-    SMOOTHING_ALPHA    = 0.60  # 0.60 responsive, 0.40 historical filter
+    SMOOTHING_ALPHA    = 0.60
     MAX_TRAIL_LEN      = 10
 
     # ── Main Loop ─────────────────────────────────────────────────────────────
@@ -207,6 +219,9 @@ def main():
 
         frame_num = fi + 1
         timestamp = fi / FPS
+
+        # Dynamic homography matrix for current camera position
+        H_current = get_homography_for_frame(calib_data, fi, fw, fh)
 
         # Run YOLO + ByteTrack
         results = model.track(
@@ -254,8 +269,8 @@ def main():
             foot_x_px = (x1 + x2) / 2.0
             foot_y_px = y2 - 0.02 * h_box
 
-            # Project to pitch metric coordinates
-            raw_x_m, raw_y_m = project_point(H, float(foot_x_px), float(foot_y_px))
+            # Project using current frame's dynamic homography
+            raw_x_m, raw_y_m = project_point(H_current, float(foot_x_px), float(foot_y_px))
 
             # Temporal EMA trajectory smoothing (eliminates stride/bounding box jitter)
             if tid in smoothed_positions:

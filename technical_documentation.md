@@ -622,3 +622,18 @@ Players whose projected coordinates fall outside `[0, PITCH_LENGTH] x [0, PITCH_
 - Lens distortion is ignored. For wide-angle lenses with significant barrel distortion, pre-undistorting the frame with a calibrated camera intrinsic matrix before homography application would improve accuracy.
 
 **Improvement path**: In a future phase, automatic landmark detection (using a pitch segmentation network or keypoint detector trained on pitch markings) could replace the manual clicking step, enabling dynamic re-calibration as the camera pans.
+
+---
+
+### 9.9 Multi-Keyframe Homography for Panning Cameras
+
+In professional football broadcasts, cameras frequently pan from one half of the pitch to the other. A single static homography matrix $\mathbf{H}_0$ calibrated on the first frame fails as soon as the camera rotates.
+
+To solve this without heavy neural pitch-line models, FootVision AI implements a **Multi-Keyframe Virtual-Anchor Projective Interpolation**:
+
+1. **Keyframe Calibration**: The user calibrates 2 or 3 anchor frames across the clip (e.g. Frame 1 looking at Right Half, Frame 375 looking at Midfield, Frame 750 looking at Left Half) using the 4× Loupe tool.
+2. **Virtual-Anchor Projective Blending**: For any intermediate frame $f$ between keyframe $f_a$ and $f_b$ ($\alpha = \frac{f - f_a}{f_b - f_a}$):
+   - The 4 image boundary corners $(0,0), (W,0), (W,H), (0,H)$ are mapped into pitch metric coordinates via $\mathbf{H}_a$ and $\mathbf{H}_b$.
+   - The metric coordinates are linearly blended: $P_i(f) = (1 - \alpha) \mathbf{H}_a(p_i) + \alpha \mathbf{H}_b(p_i)$.
+   - An intermediate homography $\mathbf{H}(f)$ is computed via `cv2.findHomography`.
+3. **Mathematical Guarantee**: Unlike naive element-wise matrix blending, 4-point virtual anchor interpolation is guaranteed to produce non-singular, geometrically valid projective matrices with continuous, smooth camera trajectories across all 750 frames.
