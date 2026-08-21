@@ -849,3 +849,54 @@ The output video (`outputs/SNMOT-062_phase12_passes.mp4`) augments the broadcast
 - `outputs/SNMOT-062_phase12_events.csv`
 - `outputs/SNMOT-062_phase12_pass_network.jpg`
 - `outputs/SNMOT-062_phase12_passes.mp4`
+---
+
+## Phase 13: Player & Team Statistics
+
+Phase 13 shifts the focus from frame-by-frame events to aggregated performance metrics over the entire clip, providing actionable insights typical of professional football analytics platforms.
+
+---
+
+### 13.1 Physical Metrics: Distance & Speed (`src/analytics/statistics.py`)
+
+Calculating the distance a player covers from broadcast video introduces the problem of **bounding box jitter**. Frame-by-frame fluctuations in YOLO detections can falsely accumulate into massive distances (a stationary player might "vibrate" and accumulate 50 meters of distance). 
+
+To solve this:
+1. **Low-Pass Filter**: A Central Moving Average (EMA) with a window size of 11 frames ($\approx 0.44\text{s}$) is applied to the raw $(x_m, y_m)$ pitch coordinates. This smooths out high-frequency bounding box noise while preserving genuine kinematic sprints.
+2. **Speed Calculation**:
+   - $v_{t} = \frac{\sqrt{(x_t - x_{t-1})^2 + (y_t - y_{t-1})^2}}{\Delta t}$
+   - An anomaly threshold ($43 \text{ km/h}$) rejects unrealistic speeds caused by occlusion jumps or ID switching.
+3. **Data Fusion**: The metrics are merged with passing data from Phase 12 to create a comprehensive player profile.
+
+**Output Profile (`outputs/SNMOT-062_phase13_player_stats.csv`)**:
+Columns: `track_id`, `team_label`, `time_visible_s`, `distance_covered_m`, `avg_speed_kmh`, `max_speed_kmh`, `passes_made`.
+
+---
+
+### 13.2 Team Spatial Metrics: Width & Depth
+
+Spatial metrics quantify team shape and tactical structure dynamically throughout the clip:
+- **Depth**: The longitudinal stretch of the team (from the deepest defender to the highest attacker). Calculated as $\max(X_m) - \min(X_m)$ for all visible outfield players on a team.
+- **Width**: The lateral stretch of the team. Calculated as $\max(Y_m) - \min(Y_m)$.
+
+These metrics are calculated on a per-frame basis and exported to `outputs/SNMOT-062_phase13_team_metrics.csv`. Analysts can plot this data to see how a team expands in possession and compacts in defense.
+
+---
+
+### 13.3 Spatial Heatmaps
+
+Heatmaps reveal the zones of pitch dominance for each team.
+1. **2D Histogram Canvas**: The pitch is scaled to 10 pixels-per-meter (creating a $1050 \times 680$ matrix).
+2. **Accumulation**: Every valid player coordinate increments the corresponding matrix bin.
+3. **Gaussian Smoothing**: A large spatial blur (`sigma=16`) spreads the discrete point data into continuous probability zones.
+4. **Colormap Blending**: The normalized density matrix is mapped to the `JET` colormap and alpha-blended over the 2D pitch radar.
+5. **Output**: `outputs/SNMOT-062_phase13_heatmaps.jpg` (Side-by-side composite of Team A and Team B).
+
+---
+
+### 13.4 Deliverables
+- `src/analytics/statistics.py`
+- `scripts/phase13_statistics.py`
+- `outputs/SNMOT-062_phase13_player_stats.csv`
+- `outputs/SNMOT-062_phase13_team_metrics.csv`
+- `outputs/SNMOT-062_phase13_heatmaps.jpg`

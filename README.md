@@ -161,6 +161,6 @@ Build one understandable component at a time, verify its output, then connect it
 | 10 | Ball detection & tracking | ✅ | Dedicated ball pipeline & missing state tracking |
 | 11 | Possession estimation | ✅ | Ball-to-player proximity & team possession timeline |
 | 12 | Pass detection | ✅ | Completed passes, turnovers, pass network arrows |
-| 13 | Player & team statistics | 🔲 | Visible distance, team width/depth, heatmaps |
+| 13 | Player & team statistics | ✅ | Visible distance, team width/depth, heatmaps |
 | 14 | Interactive Dashboard | 🔲 | Streamlit match dashboard |
 
