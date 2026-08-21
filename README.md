@@ -162,5 +162,15 @@ Build one understandable component at a time, verify its output, then connect it
 | 11 | Possession estimation | ✅ | Ball-to-player proximity & team possession timeline |
 | 12 | Pass detection | ✅ | Completed passes, turnovers, pass network arrows |
 | 13 | Player & team statistics | ✅ | Visible distance, team width/depth, heatmaps |
-| 14 | Interactive Dashboard | 🔲 | Streamlit match dashboard |
+| 14 | Interactive Dashboard | ✅ | Streamlit match dashboard |
 
+---
+
+## Running the Dashboard (Phase 14)
+
+Once all pipeline phases have been executed and the `outputs/` folder is populated, you can launch the interactive web dashboard to explore the match analytics:
+
+```bash
+streamlit run app.py
+```
+Open the provided `localhost` URL in your browser.

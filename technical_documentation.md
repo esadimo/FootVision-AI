@@ -900,3 +900,40 @@ Heatmaps reveal the zones of pitch dominance for each team.
 - `outputs/SNMOT-062_phase13_player_stats.csv`
 - `outputs/SNMOT-062_phase13_team_metrics.csv`
 - `outputs/SNMOT-062_phase13_heatmaps.jpg`
+---
+
+## Phase 14: Interactive Dashboard (`app.py`)
+
+Phase 14 represents the final culmination of the FootVision AI pipeline. Rather than interacting with raw terminal outputs, CSV files, and scattered MP4s, the user can visualize all generated analytics through a unified **Streamlit web dashboard**.
+
+Because the heavy lifting (neural network inference, homography projection, clustering, and kinematic filtering) is fully decoupled and completed in Phases 1 through 13, the dashboard itself is extremely lightweight. It merely acts as a presentation layer reading from the `outputs/` directory.
+
+### 14.1 Dashboard Architecture
+
+The dashboard is structured into three primary tabs:
+
+#### 1. 📺 Match Overview
+- **Metrics**: Reads the final frame row from `outputs/SNMOT-062_phase11_possession.csv` to display the global possession split (e.g., Team A 61% / Team B 39%).
+- **Replay**: Embeds the annotated `outputs/SNMOT-062_phase12_passes.mp4` video, allowing the user to watch the sequence with dynamic HUD elements, pass arrows, and event popups superimposed on the broadcast frame.
+
+#### 2. 🏃 Player Physical & Technical Stats
+- **Data Table**: Loads `outputs/SNMOT-062_phase13_player_stats.csv` into an interactive Pandas dataframe. The table highlights the max values (top speed, highest distance covered, most passes made) and allows column-level sorting.
+- **Visuals**: A bar chart visualizing the Top 15 players by total distance covered, labeling them by team and tracking ID.
+
+#### 3. 📋 Tactical Analysis
+- **Spatial Imagery**: Side-by-side rendering of the Gaussian **Heatmaps** and the **Tactical Pass Network** generated in Phase 12 and 13.
+- **Shape Dynamics**: Interactive line charts plotting the `width` and `depth` of both teams over time (from `outputs/SNMOT-062_phase13_team_metrics.csv`). Analysts can hover over these lines to see the exact meter stretch of a team at a specific frame.
+
+### 14.2 Running the Dashboard
+
+To launch the dashboard locally, simply run:
+```bash
+streamlit run app.py
+```
+This spawns a local web server (typically on `localhost:8501`) that hot-reloads if `app.py` is modified. The sidebar allows dynamically changing the target sequence folder if multiple match clips have been processed.
+
+---
+
+### Conclusion
+
+This completes the **Version 1 Specification** of FootVision AI. The pipeline successfully transitions from raw, unstructured broadcast video into structured tabular datasets, spatial tracking, passing networks, and an interactive analytics suite. 
