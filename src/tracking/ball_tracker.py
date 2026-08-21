@@ -103,10 +103,13 @@ class BallTracker:
             })
             return None, False
 
-    def get_trail(self, length: int = 15) -> List[Tuple[float, float]]:
-        """Returns the recent historical trail of the ball for visualization."""
+    def get_trail(self, length: int = 12) -> List[Tuple[int, Tuple[float, float]]]:
+        """Returns recent consecutive historical trail of the ball (frame, pos)."""
         trail = []
-        for item in list(self.history)[-length:]:
+        recent = list(self.history)[-length:]
+        for item in recent:
             if item['pos'] is not None:
-                trail.append(item['pos'])
+                trail.append((item['frame'], item['pos']))
+            else:
+                trail.clear()  # Reset trail on lost frames so lines don't cross gaps
         return trail

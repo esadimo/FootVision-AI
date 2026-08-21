@@ -76,12 +76,13 @@ def draw_ball_overlay(frame: np.ndarray,
     # Draw trail
     if len(trail) > 1:
         for i in range(1, len(trail)):
-            pt1 = tuple(map(int, trail[i-1]))
-            pt2 = tuple(map(int, trail[i]))
-            # Fade trail based on age
-            thickness = 2
-            color = (0, 140, 255) # Orange tail
-            cv2.line(out, pt1, pt2, color, thickness, cv2.LINE_AA)
+            f_prev, pt_prev = trail[i-1]
+            f_curr, pt_curr = trail[i]
+            if f_curr - f_prev == 1:
+                dist = np.hypot(pt_curr[0] - pt_prev[0], pt_curr[1] - pt_prev[1])
+                if dist < 60.0:
+                    thickness = max(1, int(3 * (i / len(trail))))
+                    cv2.line(out, tuple(map(int, pt_prev)), tuple(map(int, pt_curr)), (0, 140, 255), thickness, cv2.LINE_AA)
 
     # Draw current ball position
     # Orange circle for detected, Dashed/Yellowish for interpolated

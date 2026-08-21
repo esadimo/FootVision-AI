@@ -127,12 +127,22 @@ def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, c_color, 2, cv2.LINE_AA)
 
     # 3. Ball Tracking (Phase 10)
-    if len(ball_trail) > 1:
+    if p10 is not None and len(ball_trail) > 1:
         for i in range(1, len(ball_trail)):
-            cv2.line(out, tuple(map(int, ball_trail[i-1])), tuple(map(int, ball_trail[i])), (0, 140, 255), 2, cv2.LINE_AA)
+            f_prev, pt_prev = ball_trail[i-1]
+            f_curr, pt_curr = ball_trail[i]
+            
+            # Only connect if consecutive frames and physical distance < 60px per frame
+            if f_curr - f_prev == 1:
+                dist_px = np.hypot(pt_curr[0] - pt_prev[0], pt_curr[1] - pt_prev[1])
+                if dist_px < 60.0:
+                    # Clean comet tail
+                    thickness = max(1, int(3 * (i / len(ball_trail))))
+                    cv2.line(out, tuple(map(int, pt_prev)), tuple(map(int, pt_curr)), (0, 140, 255), thickness, cv2.LINE_AA)
+                    
     if p10:
         bx, by = map(int, p10)
-        cv2.circle(out, (bx, by), 12, (0, 215, 255), 2, cv2.LINE_AA)
+        cv2.circle(out, (bx, by), 10, (0, 215, 255), 2, cv2.LINE_AA)
         cv2.circle(out, (bx, by), 2, (255, 255, 255), -1)
 
     # 4. Top HUD Banner (Phase 11 & 13)
@@ -239,7 +249,7 @@ def main():
     out_path = os.path.join(args.output_dir, f"{seq}_phase14_ultimate.mp4")
     writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), FPS, (fw, fh))
 
-    ball_trail = deque(maxlen=20)
+    ball_trail = deque(maxlen=12)
     t0 = time.time()
 
     for fi, fname in enumerate(frames):
@@ -248,11 +258,13 @@ def main():
         
         H = get_homography_for_frame(calib, fi, fw, fh)
         
-        if fnum in d10:
-            ball_trail.append(d10[fnum])
+        p10 = d10.get(fnum, None)
+        if p10 is not None:
+            ball_trail.append((fnum, p10))
+        else:
+            ball_trail.clear()
             
         p8  = d8.get(fnum, [])
-        p10 = d10.get(fnum, None)
         p11 = d11.get(fnum, {'poss_team': 'None', 'closest_id': -1, 'dist_m': 99, 'pct_A': 50, 'pct_B': 50})
         p12 = d12.get(fnum, [])
         p13 = d13.get(fnum, None)
