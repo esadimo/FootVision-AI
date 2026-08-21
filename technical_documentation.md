@@ -937,3 +937,38 @@ This spawns a local web server (typically on `localhost:8501`) that hot-reloads 
 ### Conclusion
 
 This completes the **Version 1 Specification** of FootVision AI. The pipeline successfully transitions from raw, unstructured broadcast video into structured tabular datasets, spatial tracking, passing networks, and an interactive analytics suite. 
+---
+
+## Phase 14: Ultimate Dashboard Video (`scripts/phase14_ultimate_video.py`)
+
+Phase 14 produces a single, highly-polished broadcast video overlay that acts as an "Ultimate Dashboard." Instead of relying on a separate web application, this script draws all analytical metrics directly onto the video frames.
+
+### 14.1 Dashboard Components
+The script loads the CSV outputs from all preceding analytics phases (8, 9, 10, 11, 12, 13) and renders the following overlays simultaneously:
+
+1. **Broadcast Annotations (Phases 8 & 10)**:
+   - Player bounding boxes and ID tags dynamically colored by team classification.
+   - Ball tracking circle and a motion comet-tail.
+
+2. **Live Possession HUD (Phase 11)**:
+   - A real-time connection line drawn between the ball and the active ball-carrier (color-coded by distance threshold).
+   - Top banner displaying global possession percentages.
+   - A bottom timeline progress bar showing the balance of possession.
+
+3. **Live Tactical Minimap Radar (Phase 9)**:
+   - A $315 \times 204$ pixel 2D pitch radar inset rendered in the bottom right corner (similar to video game minimaps).
+   - Uses the homography matrix to project all players and the ball onto the 2D plane in real-time.
+
+4. **Event Popups (Phase 12)**:
+   - Large on-screen banners flash when a pass is completed or a turnover/interception occurs, detailing the involved players.
+
+5. **Live Spatial Metrics (Phase 13)**:
+   - Top banner includes instantaneous calculations of Team A and Team B's spatial width and depth.
+
+### 14.2 Execution
+```bash
+python scripts/phase14_ultimate_video.py
+```
+**Output**: `outputs/SNMOT-062_phase14_ultimate.mp4`
+
+This file is the final, ultimate presentation deliverable for the FootVision AI project.
