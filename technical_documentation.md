@@ -637,3 +637,104 @@ To solve this without heavy neural pitch-line models, FootVision AI implements a
    - The metric coordinates are linearly blended: $P_i(f) = (1 - \alpha) \mathbf{H}_a(p_i) + \alpha \mathbf{H}_b(p_i)$.
    - An intermediate homography $\mathbf{H}(f)$ is computed via `cv2.findHomography`.
 3. **Mathematical Guarantee**: Unlike naive element-wise matrix blending, 4-point virtual anchor interpolation is guaranteed to produce non-singular, geometrically valid projective matrices with continuous, smooth camera trajectories across all 750 frames.
+
+---
+
+## Phase 10: Ball Detection & Kinematic Tracking
+
+Phase 10 implements the ball tracking subsystem of FootVision AI. While players are relatively large objects easily detected and tracked across frames, a football presents distinct challenges due to extreme velocities, rapid scale variations, severe motion blur, and frequent physical occlusions by players' bodies.
+
+---
+
+### 10.1 Key Challenges and Solution Strategy
+
+| Challenge | Real-World manifestation | Solution in FootVision AI |
+|---|---|---|
+| **Small Scale** | Ball is often only $8 \times 8$ to $20 \times 20$ pixels in 1080p broadcast video | Restrict detector strictly to class `32` (`sports ball`) and lower baseline confidence |
+| **Motion Blur** | Fast passes / shots stretch the ball into an elongated low-contrast blur | Ultra-low confidence threshold ($\text{conf} = 0.05$) to maximize recall |
+| **False Positives** | Low confidence triggers false detections on white boots, knee pads, socks, and field markings | Geometric aspect ratio and radius filters |
+| **Occlusion & Dropouts** | Ball hidden behind players or invisible during blur transitions | Discrete kinematic extrapolation with exponential velocity dampening |
+
+---
+
+### 10.2 Files Introduced
+
+| File | Component | Role |
+|---|---|---|
+| `src/detection/ball_detector.py` | `BallDetector` | Custom filter wrapper for YOLO class 32 boxes with geometric sanity checks |
+| `src/tracking/ball_tracker.py` | `BallTracker` | State manager tracking ball trajectory, history buffer, and missing-state interpolation |
+| `scripts/phase10_ball_tracking.py` | Pipeline Script | End-to-end execution, HUD rendering, comet-tail trajectory overlay, CSV and video export |
+
+---
+
+### 10.3 `src/detection/ball_detector.py` — Detection Heuristics
+
+The `BallDetector` receives raw YOLO prediction boxes and isolates candidate balls using a three-stage filter:
+
+1. **Class and Confidence Gating**:
+   $$\text{class\_id} = 32 \quad \land \quad \text{confidence} \ge \tau_{\text{ball}} \quad (\tau_{\text{ball}} = 0.05)$$
+   Lowering the confidence threshold from the person-detection default ($0.20$) down to $0.05$ ensures that high-speed balls blurred across multiple scanlines are not discarded by the neural network's NMS.
+
+2. **Size Filtering**:
+   $$w \le 2 \cdot r_{\text{max}} \quad \land \quad h \le 2 \cdot r_{\text{max}} \quad (r_{\text{max}} = 35\text{ px})$$
+   Rejects large objects (such as player torsos or advertising boards) that may erroneously receive ball class labels.
+
+3. **Aspect Ratio Sanity Check**:
+   $$\text{aspect\_ratio} = \frac{\max(w, h)}{\min(w, h)} \le 3.0$$
+   Allows for realistic motion-blur elongation along the trajectory vector while rejecting elongated vertical structures (such as player legs, socks, or goalposts).
+
+4. **Candidate Arbitration**:
+   If multiple candidates satisfy all criteria, the candidate with the highest detection confidence is selected:
+   $$\mathbf{b}^* = \arg\max_{\mathbf{b} \in \mathcal{B}} \text{conf}(\mathbf{b})$$
+
+---
+
+### 10.4 `src/tracking/ball_tracker.py` — Kinematic Extrapolation
+
+When the ball is not detected in frame $t$ (due to occlusion or extreme blur), `BallTracker` maintains trajectory continuity using dampened linear velocity extrapolation.
+
+#### Algorithm:
+1. **History Maintenance**: A rolling buffer $\mathcal{H}$ of length $K = 45$ records historical positions:
+   $$\mathbf{p}_f = (x_f, y_f, \text{is\_interpolated})$$
+2. **Velocity Vector Calculation**:
+   When a frame lacks a direct detection, the tracker queries the last two *valid* (uninterpolated) detections $(\mathbf{p}_1, f_1)$ and $(\mathbf{p}_2, f_2)$:
+   $$\mathbf{v} = \begin{pmatrix} v_x \\ v_y \end{pmatrix} = \frac{\mathbf{p}_2 - \mathbf{p}_1}{f_2 - f_1}$$
+3. **Dampened Position Extrapolation**:
+   For frame gap $\Delta f = f - f_2$ (where $\Delta f \le 15$ frames):
+   $$\gamma = 0.95^{\Delta f}$$
+   $$\hat{\mathbf{p}}_f = \mathbf{p}_2 + \mathbf{v} \cdot \Delta f \cdot \gamma$$
+   The exponential dampening coefficient $\gamma$ prevents unbounded drift if a pass changes trajectory during occlusion.
+4. **State Transition**:
+   - $\Delta f = 0$: State = `DETECTED` (rendered in bright yellow-orange with high confidence tag)
+   - $1 \le \Delta f \le 15$: State = `INTERPOLATED` (rendered with `EST` tag and dashed outline)
+   - $\Delta f > 15$: State = `LOST` (tracking terminates until next valid YOLO detection)
+
+---
+
+### 10.5 Pipeline & Visual Representation (`scripts/phase10_ball_tracking.py`)
+
+#### Overlays:
+- **Comet Tail**: Trajectory polyline connecting the last 20 ball positions with temporal alpha-blending to visualize ball motion vector and spin curve.
+- **Ball Ring**: Outer highlight ring (radius 12 px) and center crosshair point (radius 2 px).
+- **HUD Bar**: Top banner displaying real-time frame index, timestamp, tracking state (`DETECTED` / `INTERPOLATED` / `LOST`), and YOLO confidence score.
+
+#### Data Output Schema (`outputs/SNMOT-062_phase10_ball.csv`):
+| Column | Type | Description |
+|---|---|---|
+| `frame_number` | `int` | 1-indexed video frame counter |
+| `timestamp_s` | `float` | Playback timestamp in seconds |
+| `ball_detected` | `int` | `1` if ball location known (detected or interpolated), `0` if lost |
+| `x_center` | `float` | Pixel X center coordinate ($-1.0$ if lost) |
+| `y_center` | `float` | Pixel Y center coordinate ($-1.0$ if lost) |
+| `is_interpolated`| `int` | `1` if location was kinematically estimated, `0` if raw YOLO detection |
+| `confidence` | `float` | Raw YOLOv8 confidence score ($0.00$ if interpolated/lost) |
+
+---
+
+### 10.6 Deliverables
+- `src/detection/ball_detector.py`
+- `src/tracking/ball_tracker.py`
+- `scripts/phase10_ball_tracking.py`
+- `outputs/SNMOT-062_phase10_ball.mp4`
+- `outputs/SNMOT-062_phase10_ball.csv`
+
