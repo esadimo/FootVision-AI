@@ -792,3 +792,60 @@ The output video (`outputs/SNMOT-062_phase11_possession.mp4`) features several v
 - `scripts/phase11_possession.py`
 - `outputs/SNMOT-062_phase11_possession.mp4`
 - `outputs/SNMOT-062_phase11_possession.csv`
+---
+
+## Phase 12: Pass Detection
+
+Phase 12 utilizes the possession timeline to extract discrete passing and turnover events, allowing for the generation of traditional football passing network diagrams and event logs.
+
+---
+
+### 12.1 Pass Detection Heuristics (`src/analytics/pass_detector.py`)
+
+A pass is defined logically by a transfer of control. The `PassDetector` iterates through the possession timeline and applies a state machine:
+1. **Control Threshold**: A player is considered the "active controller" if they are the closest player to the ball and within `2.5m`.
+2. **Transfer Condition**: When the active controller changes from `Player_A` to `Player_B` (with both satisfying the control threshold at their respective times):
+   - **Pass**: If `Player_A` and `Player_B` belong to the same team.
+   - **Turnover**: If `Player_A` and `Player_B` belong to opposing teams.
+3. **Temporal Gaps**: To prevent micro-transfers during physical scrums, a transfer is only recorded if the `start_frame` (last touch of Player A) and `end_frame` (first touch of Player B) are strictly sequential or separated by a gap (the pass travel time).
+
+*Note on Dribbling*: As long as `Player_A` remains the closest player under the threshold, the state machine simply extends the `last_touch_frame` without generating a new event.
+
+---
+
+### 12.2 Event Output Schema (`outputs/SNMOT-062_phase12_events.csv`)
+
+| Column | Type | Description |
+|---|---|---|
+| `start_frame` | `int` | Frame where the ball was released by the sender |
+| `end_frame` | `int` | Frame where the ball was received by the recipient |
+| `from_player` | `int` | ByteTrack ID of the sender |
+| `to_player` | `int` | ByteTrack ID of the recipient |
+| `from_team` | `string` | Team label of the sender |
+| `to_team` | `string` | Team label of the recipient |
+| `event_type` | `string` | `"Pass"` or `"Turnover"` |
+
+---
+
+### 12.3 Pass Network Generation
+
+The script automatically renders a **Pass Network Plot** (`outputs/SNMOT-062_phase12_pass_network.jpg`) on the 2D pitch radar.
+- **Nodes**: Players are plotted at their average pitch coordinate during the sequence.
+- **Edges**: White lines connect players who completed passes. Line thickness is scaled by the volume of passes between the specific pair.
+
+---
+
+### 12.4 Visual Overlays
+
+The output video (`outputs/SNMOT-062_phase12_passes.mp4`) augments the broadcast frame with an Event Popup engine. When a pass or turnover is completed (at `end_frame`), a large banner appears at the bottom of the screen for 1.5 seconds.
+- Completed Pass banners are colored based on the possessing team.
+- Turnover banners are distinctively colored red to highlight possession changes.
+
+---
+
+### 12.5 Deliverables
+- `src/analytics/pass_detector.py`
+- `scripts/phase12_pass_detection.py`
+- `outputs/SNMOT-062_phase12_events.csv`
+- `outputs/SNMOT-062_phase12_pass_network.jpg`
+- `outputs/SNMOT-062_phase12_passes.mp4`
