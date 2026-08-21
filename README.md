@@ -159,7 +159,7 @@ Build one understandable component at a time, verify its output, then connect it
 | 8 | Team classification | ✅ | CIE-LAB K-Means + outlier rejection (Ref/GK), temporal voting |
 | 9 | Pitch calibration & 2D radar | ✅ | Homography projection, side-by-side tactical radar, pitch coords CSV |
 | 10 | Ball detection & tracking | ✅ | Dedicated ball pipeline & missing state tracking |
-| 11 | Possession estimation | 🔲 | Ball-to-player proximity & team possession timeline |
+| 11 | Possession estimation | ✅ | Ball-to-player proximity & team possession timeline |
 | 12 | Pass detection | 🔲 | Completed passes, turnovers, pass network arrows |
 | 13 | Player & team statistics | 🔲 | Visible distance, team width/depth, heatmaps |
 | 14 | Interactive Dashboard | 🔲 | Streamlit match dashboard |

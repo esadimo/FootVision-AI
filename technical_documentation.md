@@ -738,3 +738,57 @@ When the ball is not detected in frame $t$ (due to occlusion or extreme blur), `
 - `outputs/SNMOT-062_phase10_ball.mp4`
 - `outputs/SNMOT-062_phase10_ball.csv`
 
+---
+
+## Phase 11: Possession Estimation
+
+Phase 11 introduces a high-level analytics layer that determines which team is in possession of the ball at any given frame. It synthesizes the data streams from previous phases—specifically, player tracking (Phase 7), team classification (Phase 8), pitch calibration (Phase 9), and ball tracking (Phase 10).
+
+---
+
+### 11.1 The Proximity & State Machine Algorithm
+
+Rather than running heavy neural network inferences from scratch, the `scripts/phase11_possession.py` pipeline reads the pre-computed CSV files and performs calculations in real-world metric space (metres) on the pitch plane.
+
+**Proximity Check (`PROXIMITY_M = 2.5`)**
+For every frame $f$, the ball's pixel coordinate is projected into pitch metric space using the multi-keyframe homography. The Euclidean distance between the ball and every detected player's ground-contact point is calculated:
+$$ d(P_i, B) = \sqrt{(P_{i_x} - B_x)^2 + (P_{i_y} - B_y)^2} $$
+The player $P^*$ with the minimum distance $d(P^*, B)$ is identified.
+
+**State Machine & Smoothing (`SMOOTHING_FRAMES = 3`)**
+A simple instantaneous proximity check causes flickering possession when the ball passes near a defender, or when it is loose in the air. To resolve this, `PossessionEstimator` uses a state machine:
+1. If $d(P^*, B) \le 2.5\text{m}$, that player is considered to be "touching" the ball.
+2. If the touching player belongs to the *current* possession team, possession is retained.
+3. If the touching player belongs to the *opposing* team, a "steal" timer begins. The opponent must remain the closest player for at least 3 consecutive frames to officially steal possession.
+4. If $d(P^*, B) > 2.5\text{m}$, the ball is loose (e.g., during a pass or shot). Crucially, **possession does not change**. It remains with the last team that controlled it until the opponent touches it, mirroring real football logic.
+
+---
+
+### 11.2 Visual HUD and Overlays
+
+The output video (`outputs/SNMOT-062_phase11_possession.mp4`) features several visual indicators:
+- **Connection Lines**: A dynamic line connects the ball to the closest player. It turns green when the player is within the 2.5m threshold (in control) and red when outside the threshold. The metric distance is rendered midway along the line.
+- **Top HUD**: Displays real-time possession percentages and highlights the current possessing team using their classified kit color.
+- **Timeline Bar**: A progress bar at the bottom of the screen graphically represents the cumulative possession ratio between Team A and Team B.
+
+---
+
+### 11.3 Output Data Schema (`outputs/SNMOT-062_phase11_possession.csv`)
+
+| Column | Type | Description |
+|---|---|---|
+| `frame_number` | `int` | 1-indexed video frame counter |
+| `timestamp_s` | `float` | Playback timestamp in seconds |
+| `possession_team` | `string` | The team currently in control (`Team A`, `Team B`, or `None`) |
+| `closest_player_id`| `int` | ByteTrack ID of the player nearest to the ball |
+| `closest_distance_m`| `float` | Euclidean distance from the ball to the closest player in metres |
+| `team_A_pct` | `float` | Cumulative possession percentage for Team A |
+| `team_B_pct` | `float` | Cumulative possession percentage for Team B |
+
+---
+
+### 11.4 Deliverables
+- `src/analytics/possession_estimator.py`
+- `scripts/phase11_possession.py`
+- `outputs/SNMOT-062_phase11_possession.mp4`
+- `outputs/SNMOT-062_phase11_possession.csv`
