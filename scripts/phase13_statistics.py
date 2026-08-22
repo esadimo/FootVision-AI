@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description="Phase 13: Player & Team Statistics")
     parser.add_argument("--seq_dir", default="data/raw/SNMOT-062")
     parser.add_argument("--output_dir", default="outputs")
+    parser.add_argument("--no_viewer", action="store_true", help="Ignored (for CLI compatibility)")
     args = parser.parse_args()
 
     seq_name = os.path.basename(args.seq_dir)
