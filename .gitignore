@@ -45,10 +45,9 @@ models/calibration/*.pkl
 models/calibration/*.npy
 
 # =============================================================================
-# Outputs (generated files, not source)
+# Outputs (allow committing visual deliverables & data)
 # =============================================================================
-outputs/*
-!outputs/.gitkeep
+
 
 # =============================================================================
 # OS

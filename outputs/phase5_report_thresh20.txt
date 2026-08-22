@@ -1,0 +1,30 @@
+FootVision AI — Phase 5: Detection Evaluation Report
+======================================================================
+Sequence     : data/raw/SNMOT-062
+Threshold    : 0.20
+IoU Threshold: 0.50
+Frames eval. : 30
+
+OVERALL METRICS
+  TP        : 442
+  FP        : 91
+  FN        : 95
+  Precision : 0.8293  (82.9%)
+  Recall    : 0.8231  (82.3%)
+
+RECOMMENDED THRESHOLD: 0.20
+  Rationale: Captures small/distant players missed by higher thresholds.
+
+SUCCESSFUL FRAMES (recall=1.0, prec>=0.85): 0
+
+FAILURE FRAMES (recall < 0.70): 3
+  Frame 0569: Recall=0.63, GT=19, Det=19
+  Frame 0595: Recall=0.65, GT=17, Det=15
+  Frame 0646: Recall=0.69, GT=16, Det=13
+
+KNOWN LIMITATIONS
+  - Distant or very small players are harder to detect.
+  - Motion blur in fast-moving frames reduces box quality.
+  - Overlapping/occluded players may only produce one detection.
+  - Non-maximum suppression (NMS) may merge close players into one box.
+  - General COCO model has no football-specific fine-tuning.

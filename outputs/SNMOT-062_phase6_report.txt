@@ -1,0 +1,19 @@
+FootVision AI — Phase 6 Processing Report
+============================================================
+Sequence     : data/raw/SNMOT-062
+Frames proc. : 750
+Threshold    : 0.2
+
+TIMING
+  Total wall time      : 79.84 s
+  Average pipeline FPS : 9.39
+  Avg detection time   : 72.82 ms/frame
+  Avg drawing time     : 4.76 ms/frame
+
+DETECTIONS
+  Total detections     : 13183
+  Avg per frame        : 17.58
+
+OUTPUT
+  Annotated video      : outputs\SNMOT-062_phase6_detections.mp4
+  Detection CSV        : outputs\SNMOT-062_phase6_detections.csv

@@ -1,0 +1,21 @@
+FootVision AI — Phase 7 Multi-Object Tracking Report
+=================================================================
+Sequence               : data/raw/SNMOT-062
+Total Frames Processed : 750 (30.0 seconds)
+Detector Confidence    : 0.20
+
+TRACKING CONTINUITY METRICS
+  Total Unique Tracks  : 209
+  Total Track Detections : 11778
+  Average Active Players : 15.70 / frame
+  Average Track Lifetime : 2.49 seconds (62.3 frames)
+  Median Track Lifetime  : 1.04 seconds
+  Stable Tracks (>= 5s)  : 36 of 209 (17.2%)
+
+TIMING & SPEED
+  Total Processing Time  : 94.45 seconds
+  Average Throughput     : 7.94 FPS
+
+OUTPUT DELIVERABLES
+  Annotated Track Video  : outputs\SNMOT-062_phase7_tracking.mp4
+  Track Data Table (CSV) : outputs\SNMOT-062_phase7_tracks.csv
