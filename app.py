@@ -14,8 +14,19 @@ st.markdown("Automated football match analysis from recorded video.")
 
 # Sidebar Configuration
 st.sidebar.header("Data Source")
-seq_name = st.sidebar.text_input("Sequence Name", value="SNMOT-062")
 output_dir = st.sidebar.text_input("Outputs Directory", value="outputs")
+
+# Find available processed sequences or raw sequences
+available_seqs = []
+if os.path.exists("data/raw"):
+    for item in os.listdir("data/raw"):
+        if os.path.isdir(os.path.join("data/raw", item)) and item != "tracking":
+            available_seqs.append(item)
+
+if not available_seqs:
+    available_seqs = ["SNMOT-062"]
+
+seq_name = st.sidebar.selectbox("Select Sequence", options=available_seqs, index=0)
 
 # Helper function to load data safely
 @st.cache_data
@@ -39,16 +50,20 @@ with tab1:
     if possession_df is not None and not possession_df.empty:
         last_row = possession_df.iloc[-1]
         col1, col2 = st.columns(2)
-        # Using delta colors inversely or just off to show neutral stats
         col1.metric("Team A Possession", f"{last_row['team_A_pct']:.1f}%")
         col2.metric("Team B Possession", f"{last_row['team_B_pct']:.1f}%")
         
-    st.markdown("### Match Replay (Passes & Turnovers)")
-    video_path = os.path.join(output_dir, f"{seq_name}_phase12_passes.mp4")
-    if os.path.exists(video_path):
-        st.video(video_path)
+    st.markdown("### Match Replay")
+    ultimate_video_path = os.path.join(output_dir, f"{seq_name}_phase14_ultimate.mp4")
+    passes_video_path = os.path.join(output_dir, f"{seq_name}_phase12_passes.mp4")
+    
+    if os.path.exists(ultimate_video_path):
+        st.video(ultimate_video_path)
+    elif os.path.exists(passes_video_path):
+        st.video(passes_video_path)
     else:
-        st.warning(f"Annotated video not found at: {video_path}")
+        st.warning(f"Video not found in '{output_dir}'.")
+
 
 
 # --- TAB 2: Player Stats ---

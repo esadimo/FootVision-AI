@@ -932,7 +932,59 @@ The script loads the structured CSV deliverables from Phases 8 through 13 and re
 ```bash
 python scripts/phase14_ultimate_video.py
 ```
-**Output Deliverable**: `outputs/SNMOT-062_phase14_ultimate.mp4`
+
+---
+
+## Phase 15: Sequence-Agnostic Generalization & Auto Kit Discovery
+
+Phase 15 generalized FootVision AI from a match-specific pipeline into a completely universal computer vision pipeline capable of processing any SoccerNet MOT sequence without hardcoded kit colors or sequence names.
+
+```text
+               [ Raw Input Sequence: Any SoccerNet Match (e.g., SNMOT-116) ]
+                                             │
+                                             ▼
+                               [ scripts/run_pipeline.py ]
+                             (Master Orchestration Engine)
+                                             │
+                                             ▼
+                           [ src/teams/auto_classifier.py ]
+                    (K-Means Discovery on Torso CIE-LAB Profiles)
+                       ├── Auto-extracts player torso crops
+                       ├── Runs K-Means (K=4) clustering
+                       └── Assigns roles via universal chromatic physics
+                                             │
+                                             ▼
+                             [ outputs/{seq}_kit_profile.json ]
+                              (Cached Centroids & BGR Palettes)
+                                             │
+                                             ▼
+                          [ Downstream Analytics & Visualization ]
+                      (Passes, Possession, Metrics, Ultimate Video)
+```
+
+### 15.1 Data-Driven Kit Discovery (`src/teams/auto_classifier.py`)
+Rather than relying on manual threshold rules for specific color hues, `AutoKitClassifier` executes a two-stage color discovery strategy:
+1. **Fit / Discovery Stage**:
+   - Sub-samples frames evenly across the match.
+   - Extracts bounding box torsos and converts them into normalized $L^*a^*b^*$ color vectors.
+   - Runs $K$-Means clustering ($K=4$) with $K$-Means++ centroid initialization.
+   - Automatically assigns semantic labels based on universal physical properties:
+     - **Goalkeeper / Sideline Staff**: Cluster with minimum $L^*$ (darkest attire).
+     - **Referee**: Cluster with dominant yellow chromaticity ($b^* > 0$ and $b^* > |a^*|$).
+     - **Team A & Team B**: Remaining two clusters sorted by lightness / occurrence.
+   - Generates representative BGR colors directly from the discovered cluster centroids.
+   - Serializes discovery state to `{seq_name}_kit_profile.json` for fast reproducible loading.
+
+2. **Inference & Track Smoothing**:
+   - Assigns instant detections to the nearest cluster centroid in Euclidean $L^*a^*b^*$ distance.
+   - Maintains a sliding-window majority vote over track history to eliminate frame-to-frame classification flicker.
+
+### 15.2 Master Orchestration Runner (`scripts/run_pipeline.py`)
+Provides an end-to-end command-line interface to execute the full pipeline across any sequence:
+```bash
+python scripts/run_pipeline.py --seq_dir data/raw/SNMOT-116 --no_viewer
+```
+- Manages parameter propagation, sequence name resolution, and resume capabilities via `--start_phase` and `--end_phase`.
 
 ---
 
@@ -942,7 +994,7 @@ python scripts/phase14_ultimate_video.py
 |---|---|---|
 | **Deep Learning & Detection** | YOLOv8n (PyTorch / Ultralytics), COCO classes 0 (`person`) & 32 (`sports ball`) | Real-time object detection with custom confidence/geometry gating |
 | **Multi-Object Tracking** | ByteTrack (Kalman Filter + Hungarian matching on two-tier IoU associations) | Robust player track persistence across occlusions |
-| **Color Spaces & Clustering** | CIE-LAB Color Space, Delta-E ($L^*a^*b^*$), K-Means Clustering, Temporal Majority Voting | Accurate jersey color extraction resistant to lighting and shadows |
+| **Color Spaces & Clustering** | CIE-LAB Color Space, Delta-E ($L^*a^*b^*$), K-Means Clustering, Temporal Majority Voting | Automated kit discovery & player classification resistant to lighting and shadows |
 | **Projective Geometry** | Planar Homography, Direct Linear Transformation (DLT), Levenberg-Marquardt, Multi-Keyframe Virtual-Anchor Interpolation | Mapping camera pixels $(x,y)$ to FIFA pitch metric coordinates $(X,Y)$ in metres |
 | **Kinematic Estimation** | Moving Average Smoothing (EMA), Discrete Velocity Extrapolation with Exponential Dampening | Ball trajectory estimation through occlusions and jitter reduction |
 | **Tactical Analytics** | Proximity State Machines, Passing Network Graph, 2D Kernel Density Estimation (Heatmaps), Spatial Dispersion Metrics | Possession tracking, pass extraction, team width/depth, player speeds |
@@ -953,13 +1005,15 @@ python scripts/phase14_ultimate_video.py
 ### End-to-End Pipeline Summary
 
 ```
-Raw Video / Image Sequence (1080p, 25 FPS)
+Raw Video / Image Sequence (1080p, 25 FPS — Any Match)
+  │
+  ├─► Auto Kit Discovery & K-Means Clustering (Phase 8 / 15) ──► {seq}_kit_profile.json
   │
   ├─► YOLOv8 Detection (Persons: conf=0.20, Ball: conf=0.05)
   │     │
   │     ├─► ByteTrack Association ──► Persistent Player IDs (Phase 7)
   │     │     │
-  │     │     ├─► Torso Cropping & CIE-LAB K-Means ──► Team Classification (Phase 8)
+  │     │     ├─► Torso Cropping & Nearest Centroid LAB ──► Dynamic Team Classification (Phase 8)
   │     │     │
   │     │     └─► Foot Contact Extraction + Multi-Keyframe Homography ──► Pitch Metric Space (m) (Phase 9)
   │     │
@@ -973,5 +1027,6 @@ Raw Video / Image Sequence (1080p, 25 FPS)
         │
         └─► Unified Presentation (Phase 14)
               ├─► Streamlit Interactive Analytics Dashboard (`app.py`)
-              └─► Broadcast Analytics Master Video (`outputs/SNMOT-062_phase14_ultimate.mp4`)
+              └─► Broadcast Analytics Master Video (`outputs/{seq}_phase14_ultimate.mp4`)
 ```
+
