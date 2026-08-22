@@ -28,13 +28,28 @@ from src.visualization.overlays import show_frame, close_all_windows
 from src.calibration.homography import load_homography, get_homography_for_frame, project_point
 
 FPS = 25.0
-TEAM_A_COLOR = (200, 130, 130) # BGR
-TEAM_B_COLOR = (80, 200, 80)
-REF_COLOR = (0, 215, 255)
-STAFF_COLOR = (128, 128, 128)
 
-def hex_to_bgr(h):
-    return tuple(int(h[i:i+2], 16) for i in (4, 2, 0))
+# Fallback colors (used only when no kit profile JSON is found)
+_DEFAULT_COLORS = {
+    "Team A":   (200, 130, 130),
+    "Team B":   (80, 200, 80),
+    "Referee":  (0, 215, 255),
+    "Staff/GK": (128, 128, 128),
+    "Unknown":  (140, 140, 140),
+}
+
+def load_kit_colors(profile_path: str) -> dict:
+    """Load discovered kit colors from phase8 kit profile JSON. Falls back to defaults."""
+    import json
+    if os.path.exists(profile_path):
+        with open(profile_path) as f:
+            data = json.load(f)
+        raw = data.get("team_colors_bgr", {})
+        colors = {k: tuple(v) for k, v in raw.items()}
+        print(f"  [Phase 14] Kit colors loaded from profile: {profile_path}")
+        return colors
+    print(f"  [Phase 14] Kit profile not found ({profile_path}), using default colors.")
+    return dict(_DEFAULT_COLORS)
 
 # ─── Data Loaders ─────────────────────────────────────────────────────────────
 def load_phase9(path):
@@ -99,13 +114,25 @@ def draw_transparent_overlay(frame, x, y, w, h, color, alpha=0.6):
     rect = np.full(sub_img.shape, color, dtype=np.uint8)
     frame[y:y+h, x:x+w] = cv2.addWeighted(sub_img, 1 - alpha, rect, alpha, 0)
 
-def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H):
+def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H, kit_colors):
     h, w = frame.shape[:2]
     out = frame.copy()
-    
+
+    TEAM_A_COLOR = kit_colors.get("Team A",   (200, 130, 130))
+    TEAM_B_COLOR = kit_colors.get("Team B",   (80, 200, 80))
+    REF_COLOR    = kit_colors.get("Referee",  (0, 215, 255))
+    STAFF_COLOR  = kit_colors.get("Staff/GK", (128, 128, 128))
+
     # 1. Player Bboxes (Phase 8)
     for p in p8:
-        color = TEAM_A_COLOR if p['team'] == "Team A" else (TEAM_B_COLOR if p['team'] == "Team B" else (REF_COLOR if p['team'] == "Referee" else STAFF_COLOR))
+        if p['team'] == "Team A":
+            color = TEAM_A_COLOR
+        elif p['team'] == "Team B":
+            color = TEAM_B_COLOR
+        elif p['team'] == "Referee":
+            color = REF_COLOR
+        else:
+            color = STAFF_COLOR
         x1, y1, x2, y2 = map(int, p['bbox'])
         cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
         
@@ -162,8 +189,15 @@ def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H):
     # 5. Event Popups (Phase 12)
     if p12:
         evt = p12[0]
-        text = f"COMPLETED PASS: {evt['from_team']} #{evt['from_player']} -> #{evt['to_player']}" if evt['event_type'] == "Pass" else f"TURNOVER! {evt['to_team']} #{evt['to_player']} intercepted"
-        bg = TEAM_A_COLOR if (evt['event_type'] == "Pass" and evt['from_team'] == "Team A") else (TEAM_B_COLOR if (evt['event_type'] == "Pass") else (0,0,255))
+        text = (f"COMPLETED PASS: {evt['from_team']} #{evt['from_player']} -> #{evt['to_player']}"
+                if evt['event_type'] == "Pass"
+                else f"TURNOVER! {evt['to_team']} #{evt['to_player']} intercepted")
+        if evt['event_type'] == "Pass" and evt['from_team'] == "Team A":
+            bg = TEAM_A_COLOR
+        elif evt['event_type'] == "Pass":
+            bg = TEAM_B_COLOR
+        else:
+            bg = (0, 0, 255)
         
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
         ex = (w - tw) // 2
@@ -185,11 +219,13 @@ def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H):
     return out
 
 
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seq_dir", default="data/raw/SNMOT-062")
+    parser.add_argument("--seq_dir",    default="data/raw/SNMOT-062")
     parser.add_argument("--output_dir", default="outputs")
-    parser.add_argument("--no_viewer", action="store_true")
+    parser.add_argument("--no_viewer",  action="store_true")
     args = parser.parse_args()
 
     seq = os.path.basename(args.seq_dir)
@@ -197,7 +233,11 @@ def main():
     frames = sorted([f for f in os.listdir(img_dir) if f.lower().endswith(('.jpg', '.png'))])
 
     print("\n  Phase 14 -- Generating Ultimate Dashboard Video")
-    
+    print(f"  Sequence: {seq}")
+
+    # Load kit colors from phase8 profile (fully generalized)
+    kit_colors = load_kit_colors(os.path.join(args.output_dir, f"{seq}_kit_profile.json"))
+
     # Load all data
     d8  = load_phase9(os.path.join(args.output_dir, f"{seq}_phase9_pitch_coords.csv"))
     d10 = load_phase10(os.path.join(args.output_dir, f"{seq}_phase10_ball.csv"))
@@ -236,7 +276,7 @@ def main():
         p12 = d12.get(fnum, [])
         p13 = d13.get(fnum, None)
 
-        final_frame = render_dashboard(frame, fnum, p8, p10, p11, p12, p13, ball_trail, H)
+        final_frame = render_dashboard(frame, fnum, p8, p10, p11, p12, p13, ball_trail, H, kit_colors)
         writer.write(final_frame)
         
         if not args.no_viewer:
@@ -251,6 +291,8 @@ def main():
     writer.release()
     close_all_windows()
     print(f"\n  [Success] Ultimate Video saved to: {out_path}\n")
+
+
 
 if __name__ == "__main__":
     main()
