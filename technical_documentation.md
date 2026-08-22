@@ -881,25 +881,7 @@ Spatial metrics quantify team shape and tactical structure dynamically throughou
 
 These metrics are calculated on a per-frame basis and exported to `outputs/SNMOT-062_phase13_team_metrics.csv`. Analysts can plot this data to see how a team expands in possession and compacts in defense.
 
----
 
-### 13.3 Spatial Heatmaps
-
-Heatmaps reveal the zones of pitch dominance for each team.
-1. **2D Histogram Canvas**: The pitch is scaled to 10 pixels-per-meter (creating a $1050 \times 680$ matrix).
-2. **Accumulation**: Every valid player coordinate increments the corresponding matrix bin.
-3. **Gaussian Smoothing**: A large spatial blur (`sigma=16`) spreads the discrete point data into continuous probability zones.
-4. **Colormap Blending**: The normalized density matrix is mapped to the `JET` colormap and alpha-blended over the 2D pitch radar.
-5. **Output**: `outputs/SNMOT-062_phase13_heatmaps.jpg` (Side-by-side composite of Team A and Team B).
-
----
-
-### 13.4 Deliverables
-- `src/analytics/statistics.py`
-- `scripts/phase13_statistics.py`
-- `outputs/SNMOT-062_phase13_player_stats.csv`
-- `outputs/SNMOT-062_phase13_team_metrics.csv`
-- `outputs/SNMOT-062_phase13_heatmaps.jpg`
 ---
 
 ## Phase 14: Interactive Dashboard (`app.py`)
@@ -922,53 +904,74 @@ The dashboard is structured into three primary tabs:
 
 #### 3. 📋 Tactical Analysis
 - **Spatial Imagery**: Side-by-side rendering of the Gaussian **Heatmaps** and the **Tactical Pass Network** generated in Phase 12 and 13.
-- **Shape Dynamics**: Interactive line charts plotting the `width` and `depth` of both teams over time (from `outputs/SNMOT-062_phase13_team_metrics.csv`). Analysts can hover over these lines to see the exact meter stretch of a team at a specific frame.
+- **Shape Dynamics**: Interactive line charts plotting the `width` and `depth` of both teams over time (from `outputs/SNMOT-062_phase13_team_metrics.csv`).
 
-### 14.2 Running the Dashboard
-
-To launch the dashboard locally, simply run:
 ```bash
 streamlit run app.py
 ```
-This spawns a local web server (typically on `localhost:8501`) that hot-reloads if `app.py` is modified. The sidebar allows dynamically changing the target sequence folder if multiple match clips have been processed.
 
 ---
 
-### Conclusion
+### 14.2 Ultimate Broadcast Video (`scripts/phase14_ultimate_video.py`)
 
-This completes the **Version 1 Specification** of FootVision AI. The pipeline successfully transitions from raw, unstructured broadcast video into structured tabular datasets, spatial tracking, passing networks, and an interactive analytics suite. 
----
+The script loads the structured CSV deliverables from Phases 8 through 13 and renders a broadcast HUD at 33+ FPS:
 
-## Phase 14: Ultimate Dashboard Video (`scripts/phase14_ultimate_video.py`)
+1. **Player Tracking & Classification (Phase 8)**:
+   - Bounding boxes and `#ID` tags dynamically color-coded by kit classification (Team A in Light Red, Team B in Green, Referees in Yellow, Staff/GK in Gray).
+2. **Ball Tracking (Phase 10)**:
+   - Target ring and a 12-frame tapered comet tail with strict temporal adjacency and distance-jump filtering to eliminate false-positive spikes.
+3. **Possession HUD & Dynamic Connection (Phase 11)**:
+   - Metric connection line between ball and active ball-carrier (turns green when $\le 2.5\text{m}$, red when loose).
+   - Top banner with real-time possession percentages.
+   - Bottom timeline bar representing ongoing possession balance.
+4. **Live Tactical Shape Dynamics (Phase 13)**:
+   - Instantaneous pitch width (m) and depth (m) calculations rendered dynamically in the top HUD.
+5. **Event Popups (Phase 12)**:
+   - On-screen banners announcing completed passes (with sender and receiver IDs) and turnovers/interceptions.
 
-Phase 14 produces a single, highly-polished broadcast video overlay that acts as an "Ultimate Dashboard." Instead of relying on a separate web application, this script draws all analytical metrics directly onto the video frames.
-
-### 14.1 Dashboard Components
-The script loads the CSV outputs from all preceding analytics phases (8, 9, 10, 11, 12, 13) and renders the following overlays simultaneously:
-
-1. **Broadcast Annotations (Phases 8 & 10)**:
-   - Player bounding boxes and ID tags dynamically colored by team classification.
-   - Ball tracking circle and a motion comet-tail.
-
-2. **Live Possession HUD (Phase 11)**:
-   - A real-time connection line drawn between the ball and the active ball-carrier (color-coded by distance threshold).
-   - Top banner displaying global possession percentages.
-   - A bottom timeline progress bar showing the balance of possession.
-
-3. **Live Tactical Minimap Radar (Phase 9)**:
-   - A $315 \times 204$ pixel 2D pitch radar inset rendered in the bottom right corner (similar to video game minimaps).
-   - Uses the homography matrix to project all players and the ball onto the 2D plane in real-time.
-
-4. **Event Popups (Phase 12)**:
-   - Large on-screen banners flash when a pass is completed or a turnover/interception occurs, detailing the involved players.
-
-5. **Live Spatial Metrics (Phase 13)**:
-   - Top banner includes instantaneous calculations of Team A and Team B's spatial width and depth.
-
-### 14.2 Execution
 ```bash
 python scripts/phase14_ultimate_video.py
 ```
-**Output**: `outputs/SNMOT-062_phase14_ultimate.mp4`
+**Output Deliverable**: `outputs/SNMOT-062_phase14_ultimate.mp4`
 
-This file is the final, ultimate presentation deliverable for the FootVision AI project.
+---
+
+## Complete Technology Stack & Architecture Map
+
+| Layer | Technologies & Algorithms | Role in FootVision AI |
+|---|---|---|
+| **Deep Learning & Detection** | YOLOv8n (PyTorch / Ultralytics), COCO classes 0 (`person`) & 32 (`sports ball`) | Real-time object detection with custom confidence/geometry gating |
+| **Multi-Object Tracking** | ByteTrack (Kalman Filter + Hungarian matching on two-tier IoU associations) | Robust player track persistence across occlusions |
+| **Color Spaces & Clustering** | CIE-LAB Color Space, Delta-E ($L^*a^*b^*$), K-Means Clustering, Temporal Majority Voting | Accurate jersey color extraction resistant to lighting and shadows |
+| **Projective Geometry** | Planar Homography, Direct Linear Transformation (DLT), Levenberg-Marquardt, Multi-Keyframe Virtual-Anchor Interpolation | Mapping camera pixels $(x,y)$ to FIFA pitch metric coordinates $(X,Y)$ in metres |
+| **Kinematic Estimation** | Moving Average Smoothing (EMA), Discrete Velocity Extrapolation with Exponential Dampening | Ball trajectory estimation through occlusions and jitter reduction |
+| **Tactical Analytics** | Proximity State Machines, Passing Network Graph, 2D Kernel Density Estimation (Heatmaps), Spatial Dispersion Metrics | Possession tracking, pass extraction, team width/depth, player speeds |
+| **Rendering & Presentation** | OpenCV Canvas Overlays, Anti-Aliased Graphic Primitives, Alpha Blending, Streamlit Dashboard | End-to-end video annotation, plots, and interactive web visualization |
+
+---
+
+### End-to-End Pipeline Summary
+
+```
+Raw Video / Image Sequence (1080p, 25 FPS)
+  │
+  ├─► YOLOv8 Detection (Persons: conf=0.20, Ball: conf=0.05)
+  │     │
+  │     ├─► ByteTrack Association ──► Persistent Player IDs (Phase 7)
+  │     │     │
+  │     │     ├─► Torso Cropping & CIE-LAB K-Means ──► Team Classification (Phase 8)
+  │     │     │
+  │     │     └─► Foot Contact Extraction + Multi-Keyframe Homography ──► Pitch Metric Space (m) (Phase 9)
+  │     │
+  │     └─► Ball Size/Aspect Filtering + Dampened Extrapolation ──► Ball Trajectory (Phase 10)
+  │
+  └─► Analytics Engine (Phases 11 - 13)
+        │
+        ├─► Euclidean Proximity State Machine ──► Possession Timeline & % Split (Phase 11)
+        ├─► Transfer-of-Control Parsing ──► Completed Passes & Turnovers (Phase 12)
+        ├─► Spatial Dispersion & Smoothed Kinematics ──► Distance, Speed, Width, Depth, Heatmaps (Phase 13)
+        │
+        └─► Unified Presentation (Phase 14)
+              ├─► Streamlit Interactive Analytics Dashboard (`app.py`)
+              └─► Broadcast Analytics Master Video (`outputs/SNMOT-062_phase14_ultimate.mp4`)
+```
