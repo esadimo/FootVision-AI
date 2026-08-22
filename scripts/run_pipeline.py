@@ -116,8 +116,8 @@ def main():
               "Auto Kit Color Discovery + Team Classification (K-Means)"),
 
         (9,  "scripts/phase9_pitch_radar.py",
-              seq_flag + outdir_flag,          # No --no_viewer: needs interaction for first run
-              "Pitch Radar / Homography Calibration (interactive if no keyframes)"),
+              common,
+              "Pitch Radar / Homography Calibration"),
 
         (10, "scripts/phase10_ball_tracking.py",
               common + ["--conf", str(args.ball_conf)],

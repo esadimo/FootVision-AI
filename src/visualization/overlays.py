@@ -5,28 +5,29 @@ src.visualization.overlays — Overlay drawing and live visualization window man
 import cv2
 import numpy as np
 
-def show_frame(window_name: str, frame: np.ndarray, delay_ms: int = 0) -> bool:
+def show_frame(arg1, arg2=None, delay_ms: int = 1) -> bool:
     """
     Displays a frame in an interactive OpenCV pop-up window.
-    
-    Parameters
-    ----------
-    window_name : str
-        The title of the display window.
-    frame : np.ndarray
-        The BGR image array to display.
-    delay_ms : int
-        Milliseconds to wait for keypress. 
-        0 means wait indefinitely (perfect for single images).
-        1 or higher means wait that long before continuing (perfect for video loops).
-
-    Returns
-    -------
-    bool
-        True if processing should continue, False if the user requested to Quit ('q' or ESC).
+    Supports both signatures:
+      - show_frame(window_name: str, frame: np.ndarray, delay_ms: int = 1)
+      - show_frame(frame: np.ndarray, window_name: str = "Viewer", delay_ms: int = 1)
     """
+    if isinstance(arg1, str):
+        window_name = arg1
+        frame = arg2
+    elif isinstance(arg2, str):
+        window_name = arg2
+        frame = arg1
+    else:
+        window_name = "Viewer"
+        frame = arg1
+
+    if frame is None:
+        return True
+
     # Create a resizable window to fit different monitor scales
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+
     
     # Scale window bounds to a reasonable starting scale while preserving aspect ratio
     h, w = frame.shape[:2]

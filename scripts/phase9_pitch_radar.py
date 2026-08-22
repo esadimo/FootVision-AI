@@ -27,7 +27,7 @@ from ultralytics import YOLO
 
 from src.teams.crop_extractor  import extract_torso_crop
 from src.teams.colour_features import extract_chest_color_metrics
-from src.teams.classifier      import MatchKitClassifier
+from src.teams.auto_classifier import AutoKitClassifier
 from src.calibration.homography import load_homography, project_point
 from src.visualization.pitch_plots import draw_pitch_radar, build_composite_frame
 from src.visualization.overlays import show_frame, close_all_windows
@@ -171,7 +171,14 @@ def main():
 
     # ── Load Model & Classifier ───────────────────────────────────────────────
     model      = YOLO(args.model)
-    classifier = MatchKitClassifier()
+    classifier = AutoKitClassifier()
+    profile_path = os.path.join(args.output_dir, f"{seq_name}_kit_profile.json")
+    if os.path.exists(profile_path):
+        classifier.load(profile_path)
+    else:
+        print(f"  [Kit] Fitting AutoKitClassifier on {seq_name}...")
+        classifier.fit(args.seq_dir, model=model, n_sample_frames=100, conf_threshold=args.conf)
+        classifier.save(profile_path)
 
     # ── Peek at first frame to get resolution ────────────────────────────────
     first = cv2.imread(os.path.join(img_dir, frames[0]))
@@ -251,10 +258,9 @@ def main():
             # Kit classification (sliding window majority vote)
             crop = extract_torso_crop(frame, [x1, y1, x2, y2])
             if crop is not None and crop.size > 0:
-                metrics = extract_chest_color_metrics(crop)
-                label   = classifier.update_track(
+                label = classifier.update_track(
                     tid,
-                    classifier.predict_single(metrics),
+                    classifier.predict_single(crop),
                     min_votes=5
                 )
             else:
