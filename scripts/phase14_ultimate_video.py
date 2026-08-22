@@ -159,40 +159,7 @@ def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H):
         m_text = f"TEAM A: Width {p13['A_w']:.1f}m, Depth {p13['A_d']:.1f}m   |   TEAM B: Width {p13['B_w']:.1f}m, Depth {p13['B_d']:.1f}m"
         cv2.putText(out, m_text, (950, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200,200,200), 1, cv2.LINE_AA)
 
-    # 5. Minimap Radar (Phase 9)
-    # Pitch ratio 105:68
-    scale = 3.5
-    pw, ph = int(105 * scale), int(68 * scale)
-    minimap = draw_pitch(pw, ph)
-    
-    # Draw players on minimap
-    for p in p8:
-        color = TEAM_A_COLOR if p['team'] == "Team A" else (TEAM_B_COLOR if p['team'] == "Team B" else (REF_COLOR if p['team'] == "Referee" else STAFF_COLOR))
-        px = int((p['pitch'][0] / 105.0) * pw)
-        py = int((p['pitch'][1] / 68.0) * ph)
-        cv2.circle(minimap, (px, py), 6, color, -1, cv2.LINE_AA)
-        cv2.circle(minimap, (px, py), 6, (255,255,255), 1, cv2.LINE_AA)
-        
-    # Draw ball on minimap
-    if p10 and H is not None:
-        bx_m, by_m = project_point(H, p10[0], p10[1])
-        px = int((bx_m / 105.0) * pw)
-        py = int((by_m / 68.0) * ph)
-        cv2.circle(minimap, (px, py), 5, (0, 165, 255), -1, cv2.LINE_AA)
-
-    # Overlay minimap in bottom right
-    padding = 20
-    x_offset = w - pw - padding
-    y_offset = h - ph - padding - 15 # Above timeline
-    
-    # Add border to minimap
-    cv2.rectangle(minimap, (0,0), (pw-1, ph-1), (255,255,255), 2)
-    out[y_offset:y_offset+ph, x_offset:x_offset+pw] = minimap
-    
-    cv2.rectangle(out, (x_offset, y_offset-25), (x_offset+pw, y_offset), (0,0,0), cv2.FILLED)
-    cv2.putText(out, "LIVE TACTICAL RADAR", (x_offset + 10, y_offset - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1, cv2.LINE_AA)
-
-    # 6. Event Popups (Phase 12)
+    # 5. Event Popups (Phase 12)
     if p12:
         evt = p12[0]
         text = f"COMPLETED PASS: {evt['from_team']} #{evt['from_player']} -> #{evt['to_player']}" if evt['event_type'] == "Pass" else f"TURNOVER! {evt['to_team']} #{evt['to_player']} intercepted"
