@@ -96,7 +96,7 @@ def main():
     print(f"  FootVision AI — Full Pipeline")
     print(f"  Sequence  : {seq_name}")
     print(f"  Output    : {args.output_dir}/")
-    print(f"  Phases    : {args.start_phase} → {args.end_phase}")
+    print(f"  Phases    : {args.start_phase} -> {args.end_phase}")
     print(f"{'#' * 70}")
 
     # ── Phase definitions ─────────────────────────────────────────────────────

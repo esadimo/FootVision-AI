@@ -421,6 +421,7 @@ Phase 9 is the geometric intelligence layer of FootVision AI. It lifts every tra
 | `src/calibration/homography.py` | Homography computation, projection, and save/load utilities |
 | `src/visualization/pitch_plots.py` | 2D radar renderer and side-by-side composite frame builder |
 | `scripts/phase9_pick_landmarks.py` | One-time interactive calibration tool (mouse-click landmark picker) |
+| `scripts/phase9_auto_homography.py` | Camera pan/zoom tracker (ECC optical flow) for generating dense dynamic homography maps |
 | `scripts/phase9_pitch_radar.py` | Full Phase 9 pipeline: YOLOv8 + ByteTrack + kit classification + homography + composite video |
 
 ---
@@ -637,6 +638,21 @@ To solve this without heavy neural pitch-line models, FootVision AI implements a
    - The metric coordinates are linearly blended: $P_i(f) = (1 - \alpha) \mathbf{H}_a(p_i) + \alpha \mathbf{H}_b(p_i)$.
    - An intermediate homography $\mathbf{H}(f)$ is computed via `cv2.findHomography`.
 3. **Mathematical Guarantee**: Unlike naive element-wise matrix blending, 4-point virtual anchor interpolation is guaranteed to produce non-singular, geometrically valid projective matrices with continuous, smooth camera trajectories across all 750 frames.
+
+---
+
+### 9.10 Automatic Camera Calibration (Dynamic Homography Tracking via ECC)
+
+While the multi-keyframe setup interpolates camera motion between defined keyframes, manually clicking anchors across many sequences remains tedious. To automate this, we added **Automatic Dynamic Homography Tracking (`scripts/phase9_auto_homography.py`)**:
+
+- **Method**: Enhanced Correlation Coefficient (ECC) Maximization (`cv2.findTransformECC`).
+- **Workflow**:
+  1. The user defines a single initial keyframe (usually frame 0) to establish the base world coordinate transformation $\mathbf{H}_0$.
+  2. For every subsequent frame, the image is downscaled (default: 0.25x for a massive speed boost) and converted to grayscale.
+  3. The ECC algorithm iteratively aligns the current frame to the previous frame to calculate the frame-to-frame projective wrap step $\mathbf{M}_{step}$.
+  4. The cumulative small warp matrix is corrected back to full scale: $\mathbf{H}_{cum} = \mathbf{S}^{-1} \mathbf{H}_{cum\_small} \mathbf{S}$.
+  5. The dynamic homography for the frame is then computed by multiplying the base homography with the inverse cumulative camera motion: $\mathbf{H}_i = \mathbf{H}_0 \mathbf{H}_{cum}^{-1}$.
+- **Performance**: Can calculate dynamic homography at **~20 FPS** on standard sequences, headlessly.
 
 ---
 
@@ -928,6 +944,9 @@ The script loads the structured CSV deliverables from Phases 8 through 13 and re
    - Instantaneous pitch width (m) and depth (m) calculations rendered dynamically in the top HUD.
 5. **Event Popups (Phase 12)**:
    - On-screen banners announcing completed passes (with sender and receiver IDs) and turnovers/interceptions.
+6. **2D Tactical Minimap Radar**:
+   - A real-time 2D pitch visualizer mapped in the bottom-left corner of the frame.
+   - Converts the frame-by-frame tracked camera homography to project all player positions and the ball (as a yellow tracker dot) onto a standardized FIFA tactical radar.
 
 ```bash
 python scripts/phase14_ultimate_video.py

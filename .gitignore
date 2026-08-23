@@ -43,6 +43,9 @@ models/detection/*.engine
 models/tracking/*.pt
 models/calibration/*.pkl
 models/calibration/*.npy
+models/*.pt
+*.jpg
+scratch_readme.md
 
 # =============================================================================
 # Outputs (allow committing visual deliverables & data)

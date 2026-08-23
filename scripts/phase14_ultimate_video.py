@@ -23,7 +23,7 @@ if project_root not in sys.path:
 import cv2
 import numpy as np
 
-from src.visualization.pitch_plots import draw_pitch
+from src.visualization.pitch_plots import draw_pitch_radar
 from src.visualization.overlays import show_frame, close_all_windows
 from src.calibration.homography import load_homography, get_homography_for_frame, project_point
 
@@ -206,7 +206,38 @@ def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H, kit_co
         cv2.rectangle(out, (ex - 15, ey - th - 15), (ex + tw + 15, ey + 15), (255,255,255), 2)
         cv2.putText(out, text, (ex, ey), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2, cv2.LINE_AA)
 
-    # 7. Timeline Bar
+    # 7. 2D Minimap Radar
+    radar_players = []
+    for p in p8:
+        radar_players.append({
+            'track_id': p['track_id'],
+            'team_label': p['team'],
+            'pitch_x': p['pitch'][0],
+            'pitch_y': p['pitch'][1]
+        })
+        
+    # Project ball to pitch
+    if p10 and H is not None:
+        bx, by = p10
+        bx_m, by_m = project_point(H, bx, by)
+        radar_players.append({
+            'track_id': 9999,
+            'team_label': 'Referee', # Yellow dot for ball
+            'pitch_x': bx_m,
+            'pitch_y': by_m
+        })
+        
+    # Draw radar (360x236)
+    minimap = draw_pitch_radar(radar_players, canvas_w=360, canvas_h=236, margin=10)
+    mh, mw = minimap.shape[:2]
+    
+    # Place on bottom-left, just above the timeline
+    x_off = 20
+    y_off = h - mh - 25
+    out[y_off:y_off+mh, x_off:x_off+mw] = minimap
+    cv2.rectangle(out, (x_off, y_off), (x_off+mw, y_off+mh), (255,255,255), 1)
+
+    # 8. Timeline Bar
     bar_h = 10
     cv2.rectangle(out, (0, h - bar_h), (w, h), (50, 50, 50), cv2.FILLED)
     pct_a = p11['pct_A'] / 100.0 if (p11['pct_A'] + p11['pct_B']) > 0 else 0.5
