@@ -2,6 +2,12 @@
 
 > Automated football match analysis from recorded video.
 
+## 🎥 Demo
+
+![FootVision AI Demo](outputs/footvision_preview.gif)
+
+▶️ [Watch the full output video](outputs/SNMOT-062_phase14_ultimate.mp4)
+
 ## Project Overview
 
 FootVision AI is a computer-vision pipeline that watches a recorded football match and automatically produces match statistics — player tracking, team separation, pitch mapping, possession estimation, and visualizations.
