@@ -13,6 +13,8 @@ from src.calibration.pitch_model import draw_pitch, PITCH_LENGTH, PITCH_WIDTH
 TEAM_DOT_COLORS: Dict[str, Tuple[int, int, int]] = {
     "Team A":    (200, 200, 255),   # Light red/white (navy-white kit)
     "Team B":    (50,  200,  50),   # Green
+    "GK Team A": (0,   140, 255),   # Orange — GK Team A
+    "GK Team B": (255, 200,   0),   # Cyan-blue — GK Team B
     "Referee":   (0,   215, 255),   # Yellow
     "Staff/GK":  (128, 128, 128),   # Gray
     "Unknown":   (180, 180, 180),   # Light gray
@@ -21,6 +23,8 @@ TEAM_DOT_COLORS: Dict[str, Tuple[int, int, int]] = {
 TEAM_TEXT_COLORS: Dict[str, Tuple[int, int, int]] = {
     "Team A":    (200, 200, 255),
     "Team B":    (80,  255,  80),
+    "GK Team A": (0,   160, 255),
+    "GK Team B": (255, 210,  50),
     "Referee":   (0,   215, 255),
     "Staff/GK":  (150, 150, 150),
     "Unknown":   (200, 200, 200),
@@ -138,10 +142,12 @@ def draw_pitch_radar(
 def _draw_legend(canvas: np.ndarray, w: int, h: int, margin: int) -> None:
     """Draws a compact legend in the top-left corner of the radar."""
     legend_items = [
-        ("Team A",   TEAM_DOT_COLORS["Team A"]),
-        ("Team B",   TEAM_DOT_COLORS["Team B"]),
-        ("Referee",  TEAM_DOT_COLORS["Referee"]),
-        ("GK/Staff", TEAM_DOT_COLORS["Staff/GK"]),
+        ("Team A",    TEAM_DOT_COLORS["Team A"]),
+        ("Team B",    TEAM_DOT_COLORS["Team B"]),
+        ("GK A",      TEAM_DOT_COLORS["GK Team A"]),
+        ("GK B",      TEAM_DOT_COLORS["GK Team B"]),
+        ("Referee",   TEAM_DOT_COLORS["Referee"]),
+        ("GK/Staff",  TEAM_DOT_COLORS["Staff/GK"]),
     ]
     x0, y0 = margin + 4, margin + 8
     for i, (name, color) in enumerate(legend_items):

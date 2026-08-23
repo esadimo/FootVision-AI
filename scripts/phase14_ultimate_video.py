@@ -31,11 +31,13 @@ FPS = 25.0
 
 # Fallback colors (used only when no kit profile JSON is found)
 _DEFAULT_COLORS = {
-    "Team A":   (200, 130, 130),
-    "Team B":   (80, 200, 80),
-    "Referee":  (0, 215, 255),
-    "Staff/GK": (128, 128, 128),
-    "Unknown":  (140, 140, 140),
+    "Team A":    (200, 130, 130),
+    "Team B":    (80, 200, 80),
+    "GK Team A": (0,   140, 255),   # Orange
+    "GK Team B": (255, 200,   0),   # Cyan-blue
+    "Referee":   (0, 215, 255),
+    "Staff/GK":  (128, 128, 128),
+    "Unknown":   (140, 140, 140),
 }
 
 def load_kit_colors(profile_path: str) -> dict:
@@ -118,18 +120,25 @@ def render_dashboard(frame, f_num, p8, p10, p11, p12, p13, ball_trail, H, kit_co
     h, w = frame.shape[:2]
     out = frame.copy()
 
-    TEAM_A_COLOR = kit_colors.get("Team A",   (200, 130, 130))
-    TEAM_B_COLOR = kit_colors.get("Team B",   (80, 200, 80))
-    REF_COLOR    = kit_colors.get("Referee",  (0, 215, 255))
-    STAFF_COLOR  = kit_colors.get("Staff/GK", (128, 128, 128))
+    TEAM_A_COLOR = kit_colors.get("Team A",    (200, 130, 130))
+    TEAM_B_COLOR = kit_colors.get("Team B",    (80, 200, 80))
+    GKA_COLOR    = kit_colors.get("GK Team A", (0,   140, 255))   # Orange
+    GKB_COLOR    = kit_colors.get("GK Team B", (255, 200,   0))   # Cyan-blue
+    REF_COLOR    = kit_colors.get("Referee",   (0, 215, 255))
+    STAFF_COLOR  = kit_colors.get("Staff/GK",  (128, 128, 128))
 
     # 1. Player Bboxes (Phase 8)
     for p in p8:
-        if p['team'] == "Team A":
+        team = p['team']
+        if team == "Team A":
             color = TEAM_A_COLOR
-        elif p['team'] == "Team B":
+        elif team == "Team B":
             color = TEAM_B_COLOR
-        elif p['team'] == "Referee":
+        elif team == "GK Team A":
+            color = GKA_COLOR
+        elif team == "GK Team B":
+            color = GKB_COLOR
+        elif team == "Referee":
             color = REF_COLOR
         else:
             color = STAFF_COLOR

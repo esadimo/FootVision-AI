@@ -1,18 +1,19 @@
-FootVision AI — Phase 8 Kit Classification Report
+FootVision AI — Phase 8 Kit Classification Report (Generalized)
 =================================================================
 Sequence               : data/raw/SNMOT-062
-Total Frames Processed : 750 (30.0 seconds)
+Total Frames Processed : 50 (2.0 seconds)
 
-KIT SEPARATION BREAKDOWN
-  Team A (White / Navy)        : 4600 instances (39.1%)
-  Team B (Green / White)       : 5213 instances (44.3%)
-  Referees (Yellow)            : 1747 instances (14.8%)
-  Staff / Goalkeepers (Black)  : 218 instances (1.9%)
+KIT SEPARATION BREAKDOWN (Auto-Discovered Colors)
+  Team A               : 137 instances (17.1%)
+  Team B               : 584 instances (72.8%)
+  Referees             : 50 instances (6.2%)
+  Staff / Goalkeepers  : 31 instances (3.9%)
 
 TIMING & SPEED
-  Total Processing Time        : 53.86 seconds
-  Pipeline Speed               : 13.92 FPS
+  Total Processing Time        : 6.24 seconds
+  Pipeline Speed               : 8.01 FPS
 
 OUTPUT DELIVERABLES
   Annotated Video : outputs\SNMOT-062_phase8_teams.mp4
   Dataset (CSV)   : outputs\SNMOT-062_phase8_teams.csv
+  Kit Profile     : outputs\SNMOT-062_kit_profile.json

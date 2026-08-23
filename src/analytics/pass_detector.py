@@ -5,6 +5,8 @@ src.analytics.pass_detector — Identifies passing events and turnovers from pos
 import csv
 from typing import List, Dict, Any
 
+from src.teams.auto_classifier import normalize_team_label
+
 class PassDetector:
     def __init__(self, touch_threshold_m: float = 2.5):
         """
@@ -33,7 +35,8 @@ class PassDetector:
         with open(player_csv, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                player_teams[int(row['track_id'])] = row['team_label']
+                # Normalize GK labels to their base team for pass logic
+                player_teams[int(row['track_id'])] = normalize_team_label(row['team_label'])
 
         events = []
         last_touch_pid = None

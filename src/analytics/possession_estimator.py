@@ -5,6 +5,8 @@ src.analytics.possession_estimator — Determines which team has possession base
 from typing import Dict, Tuple, Optional
 import numpy as np
 
+from src.teams.auto_classifier import normalize_team_label
+
 class PossessionEstimator:
     def __init__(self, proximity_threshold_m: float = 2.0, smoothing_frames: int = 3):
         """
@@ -54,6 +56,7 @@ class PossessionEstimator:
             
             # Find closest player
             for tid, (team, px, py) in players.items():
+                team = normalize_team_label(team)   # GK Team A → Team A, etc.
                 if team not in ["Team A", "Team B"]:
                     continue # Ignore referees or staff for possession
                     

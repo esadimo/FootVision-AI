@@ -40,13 +40,29 @@ import cv2
 import numpy as np
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-ROLE_STAFF_GK = "Staff/GK"
-ROLE_REFEREE  = "Referee"
-ROLE_TEAM_A   = "Team A"
-ROLE_TEAM_B   = "Team B"
-ROLE_UNKNOWN  = "Unknown"
+ROLE_STAFF_GK  = "Staff/GK"
+ROLE_REFEREE   = "Referee"
+ROLE_TEAM_A    = "Team A"
+ROLE_TEAM_B    = "Team B"
+ROLE_GK_TEAM_A = "GK Team A"   # Goalkeeper for Team A (spatially identified)
+ROLE_GK_TEAM_B = "GK Team B"   # Goalkeeper for Team B (spatially identified)
+ROLE_UNKNOWN   = "Unknown"
 
-ALL_ROLES = [ROLE_TEAM_A, ROLE_TEAM_B, ROLE_REFEREE, ROLE_STAFF_GK, ROLE_UNKNOWN]
+ALL_ROLES = [
+    ROLE_TEAM_A, ROLE_TEAM_B,
+    ROLE_GK_TEAM_A, ROLE_GK_TEAM_B,
+    ROLE_REFEREE, ROLE_STAFF_GK,
+    ROLE_UNKNOWN,
+]
+
+# Helper: normalise a goalkeeper label to the underlying team label
+def normalize_team_label(label: str) -> str:
+    """Maps 'GK Team A' → 'Team A', 'GK Team B' → 'Team B', others unchanged."""
+    if label == ROLE_GK_TEAM_A:
+        return ROLE_TEAM_A
+    if label == ROLE_GK_TEAM_B:
+        return ROLE_TEAM_B
+    return label
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -142,11 +158,13 @@ class AutoKitClassifier:
         self._centroids_raw: Optional[np.ndarray] = None   # shape (K, 3) raw LAB
         self._label_map: Dict[int, str] = {}               # cluster_idx → role
         self._team_colors_bgr: Dict[str, Tuple[int, int, int]] = {
-            ROLE_TEAM_A:   (240, 240, 240),
-            ROLE_TEAM_B:   (35, 190, 50),
-            ROLE_REFEREE:  (0, 215, 255),
-            ROLE_STAFF_GK: (45, 45, 45),
-            ROLE_UNKNOWN:  (140, 140, 140),
+            ROLE_TEAM_A:    (240, 240, 240),
+            ROLE_TEAM_B:    (35, 190, 50),
+            ROLE_GK_TEAM_A: (0, 140, 255),    # Orange — GK Team A
+            ROLE_GK_TEAM_B: (255, 200, 0),    # Cyan-blue — GK Team B
+            ROLE_REFEREE:   (0, 215, 255),
+            ROLE_STAFF_GK:  (45, 45, 45),
+            ROLE_UNKNOWN:   (140, 140, 140),
         }
         self._track_history: Dict[int, List[str]] = defaultdict(list)
         self._stable_labels: Dict[int, str] = {}

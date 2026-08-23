@@ -9,6 +9,7 @@ import numpy as np
 import cv2
 
 from src.visualization.pitch_plots import draw_pitch
+from src.teams.auto_classifier import normalize_team_label
 
 def _moving_average(points, window=5):
     """Applies a simple moving average to smooth (x, y) trajectories and reduce bounding-box jitter."""
@@ -37,7 +38,7 @@ def calculate_player_stats(coords_csv: str, pass_events_csv: str, fps: float = 2
         reader = csv.DictReader(f)
         for row in reader:
             tid = int(row['track_id'])
-            team = row['team_label']
+            team = normalize_team_label(row['team_label'])  # GK Team A → Team A, etc.
             x = float(row['pitch_x_m'])
             y = float(row['pitch_y_m'])
             
@@ -105,7 +106,7 @@ def calculate_team_metrics(coords_csv: str):
     with open(coords_csv, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            team = row['team_label']
+            team = normalize_team_label(row['team_label'])  # GK Team A → Team A, etc.
             if team in ['Team A', 'Team B']:
                 fnum = int(row['frame_number'])
                 x = float(row['pitch_x_m'])
@@ -139,7 +140,7 @@ def generate_team_heatmaps(coords_csv: str, output_path: str):
     with open(coords_csv, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            team = row['team_label']
+            team = normalize_team_label(row['team_label'])  # GK Team A → Team A, etc.
             x = float(row['pitch_x_m'])
             y = float(row['pitch_y_m'])
             if 0 <= x <= 105 and 0 <= y <= 68:
