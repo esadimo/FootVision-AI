@@ -50,7 +50,11 @@ scratch_readme.md
 # =============================================================================
 # Outputs (allow committing visual deliverables & data)
 # =============================================================================
+# Ignore all generated MP4 videos
+outputs/*.mp4
 
+# Keep SNMOT-062 output videos
+!outputs/SNMOT-062_*.mp4
 
 # =============================================================================
 # OS
