@@ -16,6 +16,84 @@ See [SPEC.md](SPEC.md) for the precise scope of Version 1.
 
 ---
 
+## Accurate pipeline (v2)
+
+The phase-by-phase scripts (below) were replaced by a single-pass pipeline in `src/pipeline/`
+that is measured against SoccerNet-Tracking ground truth. The original runner is kept as
+`scripts/run_pipeline_legacy.py`.
+
+```
+detect (cached) → track (BoT-SORT) → PTZ camera calibration → pitch coordinates
+  → roles & teams → split tracks whose kit changes team → tracklet stitching → roles & teams
+  → ball trajectory → smoothing → control / possession / passes → player & team statistics
+```
+
+### Accuracy on the SoccerNet test split (49 clips, never used for training or tuning)
+
+| Metric | Original pipeline | v2 |
+|---|---|---|
+| Tracking HOTA | 0.44 | **0.65** |
+| IDF1 (identity kept) | 0.49 | **0.79** |
+| ID switches per 30 s clip | 141 | **42** |
+| Team assignment | 82% | **97.6%** |
+| Goalkeeper precision / recall | 27% / — | **90% / 84%** |
+| Ball within 10 px | 46% | **70%** |
+| Calibration: players projected at the right height (±25%) | — | **92%** |
+| Distance covered, median error | — | **6.7%** |
+| Pass F1 / turnover F1 | — | 0.66 / 0.51 |
+
+Possession and passes have no human labels in SoccerNet; they are scored against the same
+analytics run on ground-truth players and ball, so the numbers measure how much upstream errors
+distort them.
+
+### Data
+
+Download SoccerNet-Tracking (`train.zip`, `test.zip`) and extract into
+`data/SoccerNet/tracking/{train,test}/SNMOT-*`. Game 4 (`SNMOT-060`…`077`, train folder) is the
+validation game: the detector is never trained on it and all tuning happens on it.
+
+### Run on one sequence
+
+```bash
+python scripts/run_pipeline.py --seq_dir data/SoccerNet/tracking/train/SNMOT-062 --video
+```
+
+Writes `outputs/<seq>/` (`tracks.csv`, `ball.csv`, `possession.csv`, `events.csv`,
+`player_stats.csv`, `team_metrics.csv`, `calibration.json`, `summary.json`), the legacy
+`outputs/<seq>_phase*.csv` files used by the dashboard and, with `--video`, the broadcast video.
+Calibration is automatic; `--homography` accepts an optional hand-picked first-frame homography.
+
+### Detector
+
+```bash
+python scripts/prepare_yolo_dataset.py --src data/SoccerNet/tracking/train --out data/yolo_soccernet
+python scripts/train_detector.py --model models/detection/yolo26s.pt --imgsz 1280 --epochs 4
+```
+
+Best weights go to `models/detection/fv_yolo26s_1280.pt` (classes: player, goalkeeper, referee,
+ball). Validation mAP peaks around epoch 3; later epochs overfit.
+
+### Evaluate and tune
+
+```bash
+# cache detections once (detection is ~95% of the compute)
+python scripts/cache_detections.py --model models/detection/fv_yolo26s_1280.pt --tag ft1280 \
+    --seqs "data/SoccerNet/tracking/test/SNMOT-*" --device mps
+# full run + scores for many clips
+python scripts/run_suite.py --seqs "data/SoccerNet/tracking/test/SNMOT-*" --out outputs_test --workers 3
+# rerun game 4 with config overrides (reuses cached detections and calibration, ~4 min)
+python scripts/tune_val.py --out runs/tune/my_try --set tracker.match_thresh=0.9 events.max_hold=50
+# calibration stress test with overlays
+python scripts/check_calibration.py --out runs/calib_check data/SoccerNet/tracking/test/SNMOT-116
+# unit tests
+python -m pytest tests/
+```
+
+`--set` takes dotted keys into `PipelineConfig` (`src/pipeline/run.py`). Tune on game 4 only and
+score the test split once at the end.
+
+---
+
 ## Requirements
 
 | Tool | Version |
@@ -169,6 +247,7 @@ Build one understandable component at a time, verify its output, then connect it
 | 12 | Pass detection | ✅ | Completed passes, turnovers, pass network arrows |
 | 13 | Player & team statistics | ✅ | Visible distance, team width/depth, heatmaps |
 | 14 | Interactive Dashboard | ✅ | Streamlit match dashboard |
+| 15 | Accuracy overhaul | ✅ | Ground-truth evaluation, fine-tuned detector, PTZ calibration, tuned tracking — see [Accurate pipeline (v2)](#accurate-pipeline-v2) |
 
 ---
 
