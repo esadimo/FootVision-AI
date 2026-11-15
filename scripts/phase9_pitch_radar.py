@@ -145,9 +145,12 @@ def main():
     # ── Auto-Detect Homography File ───────────────────────────────────────────
     h_path = args.homography
     if h_path is None:
+        seq_candidate  = os.path.join(args.output_dir, f"{os.path.basename(args.seq_dir.rstrip('/'))}_homography.json")
         json_candidate = os.path.join(args.output_dir, "homography_keyframes.json")
         npy_candidate  = os.path.join(args.output_dir, "homography.npy")
-        if os.path.exists(json_candidate):
+        if os.path.exists(seq_candidate):
+            h_path = seq_candidate
+        elif os.path.exists(json_candidate):
             h_path = json_candidate
         elif os.path.exists(npy_candidate):
             h_path = npy_candidate

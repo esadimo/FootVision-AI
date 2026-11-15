@@ -85,3 +85,16 @@ build/
 *.log
 *.tmp
 *.bak
+
+# =============================================================================
+# Accuracy pipeline: datasets, caches, training runs
+# =============================================================================
+data/cache/
+data/yolo_soccernet/
+runs/
+outputs/SNMOT-*/
+outputs_new/
+outputs_val/
+outputs_test/
+outputs_test_v2/
+outputs_test_v3/

@@ -285,7 +285,10 @@ def main():
     d12 = load_phase12(os.path.join(args.output_dir, f"{seq}_phase12_events.csv"))
     d13 = load_phase13(os.path.join(args.output_dir, f"{seq}_phase13_team_metrics.csv"))
     
-    h_file = os.path.join(args.output_dir, "homography_keyframes.json")
+    # per-sequence calibration (new pipeline) first; legacy shared file only as fallback
+    h_file = os.path.join(args.output_dir, f"{seq}_homography.json")
+    if not os.path.exists(h_file):
+        h_file = os.path.join(args.output_dir, "homography_keyframes.json")
     if not os.path.exists(h_file):
         h_file = os.path.join(args.output_dir, "homography.npy")
     calib = load_homography(h_file)
