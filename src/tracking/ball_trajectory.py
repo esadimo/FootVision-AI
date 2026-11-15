@@ -18,7 +18,7 @@ future is available):
   * the best-scoring path through this DAG (longest-path DP) is the trajectory;
     gaps between linked nodes are filled by linear interpolation (both ends known)
   * several disjoint segments are allowed (ball out of view / long occlusion):
-    starting a new segment costs `restart_cost`
+    starting a new segment costs `restart_cost`; earlier segments are kept
 
 Output: one row per frame with x, y (NaN when unknown), conf, source
 ('det' | 'interp').
@@ -61,14 +61,17 @@ def solve_ball_trajectory(cands: pd.DataFrame, n_frames: int,
     conf = np.clip(c.conf.to_numpy(float), 1e-4, 1 - 1e-4)
     emit = np.log(conf / (1 - conf)) + p.conf_bias
     n = len(c)
-    score = np.full(n, -np.inf); back = np.full(n, -1)
+    score = np.full(n, -np.inf); back = np.full(n, -1); restart = np.zeros(n, bool)
     starts = np.searchsorted(fr, fr - p.max_gap)          # first candidate within the gap window
+    pref_best = np.full(n + 1, -np.inf); pref_arg = np.full(n + 1, -1)   # best score among c[:k]
 
     for j in range(n):
-        best, arg = -p.restart_cost, -1                   # start a new segment here
         lo = starts[j]
-        # candidates strictly before frame fr[j]
-        hi = np.searchsorted(fr, fr[j])
+        hi = np.searchsorted(fr, fr[j])                   # candidates strictly before frame fr[j]
+        # start a new segment here, either fresh or after the best earlier segment
+        best, arg, rs = -p.restart_cost, -1, True
+        if pref_best[hi] > 0:
+            best, arg = pref_best[hi] - p.restart_cost, pref_arg[hi]
         if hi > lo:
             i = np.arange(lo, hi)
             dt = (fr[j] - fr[i]).astype(float)
@@ -80,9 +83,13 @@ def solve_ball_trajectory(cands: pd.DataFrame, n_frames: int,
                 tot[~ok] = -np.inf
                 k = int(np.argmax(tot))
                 if tot[k] > best:
-                    best, arg = tot[k], i[k]
+                    best, arg, rs = tot[k], i[k], False
         score[j] = best + emit[j]
-        back[j] = arg
+        back[j] = arg; restart[j] = rs
+        if score[j] > pref_best[j]:
+            pref_best[j + 1], pref_arg[j + 1] = score[j], j
+        else:
+            pref_best[j + 1], pref_arg[j + 1] = pref_best[j], pref_arg[j]
 
     # best path end (allow multiple segments: walk back through restarts)
     j = int(np.argmax(score))
@@ -92,13 +99,13 @@ def solve_ball_trajectory(cands: pd.DataFrame, n_frames: int,
         j = back[j]
     chain = chain[::-1]
 
-    # Only the single best chain is returned; segments are joined by restarts which the
-    # DP already scored, so long gaps (restarts) simply are not interpolated.
+    # The best chain may contain several segments joined by restarts (ball out of view /
+    # long occlusion); gaps are only interpolated inside a segment.
     pos = {}
     for a, b in zip(chain[:-1], chain[1:]):
         pos[fr[a]] = (xs[a], ys[a], conf[a], "det")
         gap = fr[b] - fr[a]
-        linked = back[b] == a
+        linked = not restart[b]
         if linked and 1 < gap <= p.max_interp_gap:
             for t in range(1, gap):
                 w = t / gap

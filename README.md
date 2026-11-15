@@ -25,7 +25,7 @@ that is measured against SoccerNet-Tracking ground truth. The original runner is
 ```
 detect (cached) → track (BoT-SORT) → PTZ camera calibration → pitch coordinates
   → roles & teams → split tracks whose kit changes team → tracklet stitching → roles & teams
-  → ball trajectory → smoothing → control / possession / passes → player & team statistics
+  → ball trajectory (+ zoomed second detection pass) → smoothing → control / possession / passes → player & team statistics
 ```
 
 ### Accuracy on the SoccerNet test split (49 clips, never used for training or tuning)
@@ -37,10 +37,10 @@ detect (cached) → track (BoT-SORT) → PTZ camera calibration → pitch coordi
 | ID switches per 30 s clip | 141 | **42** |
 | Team assignment | 82% | **97.6%** |
 | Goalkeeper precision / recall | 27% / — | **90% / 84%** |
-| Ball within 10 px | 46% | **70%** |
+| Ball within 10 px | 46% | **77%** |
 | Calibration: players projected at the right height (±25%) | — | **92%** |
 | Distance covered, median error | — | **6.7%** |
-| Pass F1 / turnover F1 | — | 0.66 / 0.51 |
+| Pass F1 / turnover F1 | — | 0.65 / 0.54 |
 
 Possession and passes have no human labels in SoccerNet; they are scored against the same
 analytics run on ground-truth players and ball, so the numbers measure how much upstream errors

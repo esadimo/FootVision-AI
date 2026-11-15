@@ -28,6 +28,7 @@ from src.pipeline.roles_teams import assign_roles_and_teams
 from src.teams.team_clusterer import extract_features
 from src.teams.track_splitter import SplitParams, split_team_switches
 from src.tracking.ball_trajectory import BallTrajectoryParams, solve_ball_trajectory
+from src.tracking.ball_zoom import load_or_zoom
 from src.tracking.stitching import StitchParams, foot_points_pitch, stitch_tracklets
 
 
@@ -50,6 +51,7 @@ class PipelineConfig:
     events: EventParams = field(default_factory=EventParams)
     split_teams: bool = True          # cut tracks whose kit flips team (identity swaps between opponents)
     split: SplitParams = field(default_factory=SplitParams)
+    ball_zoom: bool = True            # second detection pass on a crop around the expected ball
     calib_cache: bool = True
 
 
@@ -130,6 +132,9 @@ def run_sequence(seq_dir: str, out_root: str = "outputs", cfg: PipelineConfig = 
     bc = dfd[dfd.cls == BALL_CLASS].copy()
     bc["x"] = (bc.x1 + bc.x2) / 2; bc["y"] = (bc.y1 + bc.y2) / 2
     ball = solve_ball_trajectory(bc, seq.n_frames, cfg.ball)
+    if cfg.ball_zoom:
+        zc = load_or_zoom(seq, ball, cfg.model, cfg.cache_dir, cfg.tag, device=cfg.device).assign(cls=BALL_CLASS)
+        ball = solve_ball_trajectory(pd.concat([bc, zc[bc.columns]], ignore_index=True), seq.n_frames, cfg.ball)
     ball["bx"] = np.nan; ball["by"] = np.nan
     ok = ball.x.notna()
     for i in np.flatnonzero(ok):

@@ -195,3 +195,12 @@ def test_refine_goalkeepers_uses_kit_distance_when_clustered_into_a_team():
     roles = refine_goalkeepers(t, {1: "player", 2: "player"}, team_of, kit_dist={1: 3.5, 2: 0.8})
     assert roles == {1: "goalkeeper", 2: "player"}
     assert refine_goalkeepers(t, {1: "player", 2: "player"}, team_of) == {1: "player", 2: "player"}
+
+
+def test_ball_trajectory_keeps_segments_before_a_long_gap():
+    # ball visible in frames 1–40, out of view 41–120, visible again 121–160
+    f = np.r_[np.arange(1, 41), np.arange(121, 161)]
+    cands = pd.DataFrame({"frame": f, "x": 100.0 + 2 * f, "y": 300.0, "conf": 0.6})
+    out = solve_ball_trajectory(cands, 160)
+    assert out.x.iloc[:40].notna().all() and out.x.iloc[120:].notna().all()
+    assert out.x.iloc[45:115].isna().all()           # no interpolation across the long gap
