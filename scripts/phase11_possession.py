@@ -161,7 +161,9 @@ def main():
     # 1. Check for required files
     player_csv = os.path.join(args.output_dir, f"{seq_name}_phase9_pitch_coords.csv")
     ball_csv = os.path.join(args.output_dir, f"{seq_name}_phase10_ball.csv")
-    homography_file = os.path.join(args.output_dir, "homography_keyframes.json")
+    homography_file = os.path.join(args.output_dir, f"{seq_name}_homography.json")
+    if not os.path.exists(homography_file):
+        homography_file = os.path.join(args.output_dir, "homography_keyframes.json")
     
     if not os.path.exists(homography_file):
         homography_file = os.path.join(args.output_dir, "homography.npy")
