@@ -486,7 +486,7 @@ def search_camera_position(H_frames: List[np.ndarray], cues_list: List, verbose:
 
 def calibrate_sequence(frame_paths: List[str], H_init: Optional[np.ndarray], boxes_by_frame: Dict[int, np.ndarray],
                        n_anchors: int = 25, fit_dims: bool = False, verbose: bool = True, n_auto: int = 10,
-                       reinit_anchors: bool = True):
+                       reinit_anchors: bool = True, repair: bool = True):
     """
     End-to-end calibration of one clip from a single rough image→pitch homography
     for the first frame (from the landmark picker).
@@ -497,6 +497,8 @@ def calibrate_sequence(frame_paths: List[str], H_init: Optional[np.ndarray], box
       4. anchors: frames spread over the clip re-fitted with the final centre
       5. forward and backward tracking passes that re-anchor whenever an anchor
          explains the lines better; per frame the better of the two passes is kept
+      6. self-check and repair of frames where people get an implausible size
+         (`repair_calibration`)
     Returns (cams, infos).
     """
     cues = [_cues_for(cv2.imread(p), boxes_by_frame.get(i + 1)) for i, p in enumerate(frame_paths)]
@@ -589,7 +591,155 @@ def calibrate_sequence(frame_paths: List[str], H_init: Optional[np.ndarray], box
             final_cams.append(cf); infos.append({**inf_f, "pass": "fwd"})
     if verbose:
         print(f"  [calib] {len(anchors)} anchors; final mean in3 {np.nanmean([x.get('in3', np.nan) for x in infos]):.3f} quality {np.mean([x.get('quality', 0.0) for x in infos]):.3f}")
+    if repair:
+        final_cams, infos = repair_calibration(frame_paths, final_cams, infos, boxes_by_frame, cues, C, verbose=verbose)
     return final_cams, infos
+
+
+def _line_score(cam: CameraParams, cue) -> float:
+    s, _ = line_in3(cam, cue[0], cue[1])
+    return 0.0 if np.isnan(s) else float(s) * line_coverage(cam, cue[0], cue[1])
+
+
+_GRID = np.array([[x, y] for x in np.linspace(160, 1760, 6) for y in np.linspace(380, 1040, 4)], float)
+
+
+def camera_disagreement_m(a: CameraParams, b: CameraParams) -> float:
+    """Median pitch distance (m) between where two cameras map the same image points (lower 2/3 of frame)."""
+    try:
+        pa = cv2.perspectiveTransform(_GRID[None], a.H())[0]
+        pb = cv2.perspectiveTransform(_GRID[None], b.H())[0]
+    except cv2.error:
+        return float("inf")
+    d = np.hypot(*(pa - pb).T)
+    return float(np.median(d[np.isfinite(d)])) if np.isfinite(d).any() else float("inf")
+
+
+def repair_calibration(frame_paths: List[str], cams: List[CameraParams], infos: List[Dict],
+                       boxes_by_frame: Dict[int, np.ndarray], cues: List, C: np.ndarray,
+                       hs_bad: float = 0.5, probe_every: int = 10, margin: int = 25,
+                       min_hs_gain: float = 0.1, min_line_keep: float = 0.7, max_join_m: float = 2.0,
+                       c_search: bool = True, good_hs: float = 0.6, bridge: int = 25, min_len: int = 10,
+                       max_probes: int = 12, c_search_len: int = 25, verbose: bool = True) -> Tuple[List[CameraParams], List[Dict]]:
+    """
+    Self-check and repair, no ground truth needed.
+
+    Frame-to-frame tracking can drift: once the camera estimate slides off, every refinement
+    candidate starts from the drifted prediction and the detected people stop having a plausible
+    size.  Frames scoring below `hs_bad` on `person_height_score` are flagged and grouped into
+    stretches (holes ≤ `bridge` frames joined, stretches < `min_len` frames ignored).  In each
+    stretch, up to `max_probes` frames (about every `probe_every`) are recalibrated from scratch (auto-init with the known
+    camera centre); a probe becomes an anchor only if it raises the people score by
+    ≥ `min_hs_gain` while keeping ≥ `min_line_keep` of the line fit (a template slid onto a
+    parallel line can match lines well, so line fit alone is not trusted).  If no probe qualifies,
+    nearby camera centres are scored on two frames of the stretch (the clip-wide centre can be off
+    in a way only zoomed views reveal) and the stretch is re-probed with the best one.  The stretch is then
+    re-tracked forwards and backwards from the anchors (± `margin` frames) and the new cameras are
+    accepted only if they join the well-scoring neighbours within `max_join_m` (median pitch
+    distance) or raise the stretch's mean people score by ≥ 2·`min_hs_gain` to ≥ `good_hs`
+    (a corrected centre legitimately moves the neighbours too), and per frame only where the
+    people score improves.
+    infos[i]['repaired'] marks replaced frames; infos[i]['self_check'] holds the final score.
+    """
+    n = len(cams)
+    cams, infos = list(cams), [dict(x) for x in infos]
+    bx = lambda i: boxes_by_frame.get(i + 1)
+    hs = np.array([person_height_score(cams[i], bx(i)) for i in range(n)])
+    bad = np.nan_to_num(hs, nan=1.0) < hs_bad
+    segs = []
+    if bad.any():
+        idx = np.flatnonzero(bad)
+        a = idx[0]
+        for k in range(1, len(idx) + 1):
+            if k == len(idx) or idx[k] - idx[k - 1] > bridge:
+                segs.append((int(a), int(idx[k - 1])))
+                if k < len(idx):
+                    a = idx[k]
+        # short glitches cost as much to probe as long stretches and matter little
+        segs = [(a, b) for a, b in segs if b - a + 1 >= min_len]
+    n_fixed, n_rej = 0, 0
+    def probe(i, Cc):
+        try:
+            c2, _ = auto_init_camera(cues[i], C_guess=Cc, boxes=bx(i))
+        except (np.linalg.LinAlgError, ValueError, ZeroDivisionError, cv2.error):
+            return None
+        if c2 is not None:
+            c2.L, c2.W = cams[i].L, cams[i].W
+        return c2
+
+    def accept(i, c2):
+        return (c2 is not None
+                and np.nan_to_num(person_height_score(c2, bx(i))) >= np.nan_to_num(hs[i]) + min_hs_gain
+                and _line_score(c2, cues[i]) >= min_line_keep * _line_score(cams[i], cues[i]))
+
+    for a, b in segs:
+        frames = sorted(set(np.linspace(a, b, min(max_probes, (b - a) // probe_every + 2)).astype(int).tolist()))
+        use_c = C
+        if c_search and b - a + 1 >= c_search_len:
+            # the clip-wide camera centre can be off; wide views tolerate that, zoomed views do not.
+            # Score the current and nearby centres on two frames of the stretch; probe with the best.
+            test = [a + (b - a) // 3, a + 2 * (b - a) // 3]
+            best_q = -1.0
+            for Cc in [np.asarray(C, float)] + [np.array([C[0] + dx, C[1], z]) for dx in (-7.5, 0.0, 7.5)
+                                                for z in (-10.0, -17.0, -25.0)]:
+                if not plausible_centre(Cc):
+                    continue
+                cs = [probe(i, Cc) for i in test]
+                if any(c is None for c in cs):
+                    continue
+                q_c = float(np.mean([fit_quality(c, cues[i][0], cues[i][1], bx(i)) for c, i in zip(cs, test)]))
+                if q_c > best_q:
+                    use_c, best_q = Cc, q_c
+            if verbose and use_c is not C:
+                print(f"  [calib] stretch {a}-{b}: centre search → {np.round(use_c, 1)}")
+        anchors = {i: c2 for i in frames for c2 in [probe(i, use_c)] if accept(i, c2)}
+        if verbose:
+            print(f"  [calib] stretch {a}-{b}: {len(anchors)} anchors")
+        if not anchors:
+            continue
+        lo, hi = max(0, a - margin), min(n - 1, b + margin)
+
+        def track(start, order):
+            tr = PTZTracker(anchors[start]); out = {}
+            for j in order:
+                c, info = tr.step(cv2.imread(frame_paths[j]), bx(j), cues=cues[j])
+                if j in anchors and fit_quality(anchors[j], cues[j][0], cues[j][1], bx(j)) >= info.get("quality", 0.0):
+                    tr.cam = anchors[j].copy(); c = tr.cam.copy()
+                out[j] = c
+            return out
+        k0, k1 = min(anchors), max(anchors)
+        fwd = {**track(k0, range(k0, hi + 1)), **track(k0, range(k0, lo - 1, -1))}
+        bwd = {**track(k1, range(k1, lo - 1, -1)), **track(k1, range(k1, hi + 1))}
+        new = {}
+        for j in range(lo, hi + 1):
+            cf, cb = fwd[j], bwd[j]
+            hf, hb = person_height_score(cf, bx(j)), person_height_score(cb, bx(j))
+            new[j] = cb if np.nan_to_num(hb) > np.nan_to_num(hf) else cf
+        # the repaired stretch must join the good frames around it
+        # only neighbours that pass the self-check comfortably are a trustworthy reference
+        join = [camera_disagreement_m(new[j], cams[j]) for j in range(lo, hi + 1)
+                if not bad[j] and np.nan_to_num(hs[j]) >= good_hs]
+        if verbose:
+            print(f"  [calib]   join to neighbours: median {np.median(join) if join else float('nan'):.2f} m over {len(join)} frames")
+        hs_old = np.nanmean(np.where(bad[lo:hi + 1], hs[lo:hi + 1], np.nan))
+        hs_new = np.nanmean([person_height_score(new[j], bx(j)) if bad[j] else np.nan for j in range(lo, hi + 1)])
+        clearly_better = hs_new >= hs_old + 2 * min_hs_gain and hs_new >= good_hs
+        if verbose:
+            print(f"  [calib]   flagged frames' self-check {hs_old:.2f} → {hs_new:.2f}")
+        if len(join) >= 5 and float(np.median(join)) > max_join_m and not clearly_better:
+            n_rej += 1
+            continue
+        for j in range(lo, hi + 1):
+            hj = person_height_score(new[j], bx(j))
+            if bad[j] and np.nan_to_num(hj) > np.nan_to_num(hs[j]):
+                cams[j] = new[j]; hs[j] = hj; n_fixed += 1
+                infos[j] = {**infos[j], "repaired": True}
+    if verbose and segs:
+        print(f"  [calib] self-check: {int(bad.sum())} flagged frames in {len(segs)} stretches; "
+              f"{n_fixed} repaired, {n_rej} stretches rejected (did not join neighbours)")
+    for i in range(n):
+        infos[i]["self_check"] = float(hs[i])
+    return cams, infos
 
 
 # ── fully automatic initialisation (no manual landmarks) ──────────────────────

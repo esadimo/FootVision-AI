@@ -204,3 +204,19 @@ def test_ball_trajectory_keeps_segments_before_a_long_gap():
     out = solve_ball_trajectory(cands, 160)
     assert out.x.iloc[:40].notna().all() and out.x.iloc[120:].notna().all()
     assert out.x.iloc[45:115].isna().all()           # no interpolation across the long gap
+
+
+def test_camera_disagreement_zero_for_same_camera_and_grows_with_pan():
+    from src.calibration.camera_model import camera_disagreement_m
+    a = _camera()
+    b = a.copy()
+    assert camera_disagreement_m(a, b) < 1e-6
+    b.rvec = cv2.Rodrigues(rot_from_ptr(np.deg2rad(22), np.deg2rad(14)))[0].ravel()
+    assert camera_disagreement_m(a, b) > 1.0
+
+
+def test_calibration_confidence_flags_clips_with_many_bad_frames():
+    from src.pipeline.run import calibration_confidence
+    assert calibration_confidence({"self_check": [0.9] * 8 + [0.2] * 2})["calibration_low_confidence"] is False
+    assert calibration_confidence({"self_check": [0.9] * 6 + [0.2] * 4})["calibration_low_confidence"] is True
+    assert calibration_confidence({})["calibration_self_check"] is None

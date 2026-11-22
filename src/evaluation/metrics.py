@@ -263,3 +263,29 @@ def calibration_height_check(H_frames, gt: pd.DataFrame, every: int = 5, person_
     return {"height_ratio_med": float(np.median(r)),
             "height_ok": float((np.abs(np.log(r)) < np.log(1 + tol)).mean()),
             "feet_on_pitch": float(np.mean(inside))}
+
+
+def calibration_keeper_check(H_frames, gt: pd.DataFrame, pitch_len: float = 105.0, every: int = 5,
+                             max_goal_dist: float = 25.0) -> dict:
+    """
+    Calibration check for errors the height check cannot see: a template shifted along the
+    pitch, or mirrored, still gives players the right size.  Ground-truth goalkeepers stand near
+    their own goal line, so their mapped foot point must lie within `max_goal_dist` metres of
+    x = 0 or x = pitch_len.  A keeper can step out; the median over frames is robust to that.
+
+    Returns keeper_goal_dist_med (metres) and keeper_ok (fraction of keeper detections within
+    max_goal_dist), NaN when the clip has no ground-truth goalkeeper.
+    """
+    import cv2
+    g = gt[(gt.role == "goalkeeper") & ((gt.frame - 1) % every == 0)]
+    d = []
+    for f, rows in g.groupby("frame"):
+        if f - 1 >= len(H_frames):
+            continue
+        feet = np.c_[((rows.x1 + rows.x2) / 2).to_numpy(float), rows.y2.to_numpy(float)]
+        P = cv2.perspectiveTransform(feet[None], np.asarray(H_frames[f - 1], float))[0]
+        d.extend(np.minimum(np.abs(P[:, 0]), np.abs(pitch_len - P[:, 0])).tolist())
+    if not d:
+        return {"keeper_goal_dist_med": np.nan, "keeper_ok": np.nan}
+    d = np.array(d)
+    return {"keeper_goal_dist_med": float(np.median(d)), "keeper_ok": float((d <= max_goal_dist).mean())}

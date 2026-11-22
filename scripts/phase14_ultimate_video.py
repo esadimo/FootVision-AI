@@ -297,7 +297,10 @@ def main():
     fh, fw = first.shape[:2]
 
     out_path = os.path.join(args.output_dir, f"{seq}_phase14_ultimate.mp4")
-    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), FPS, (fw, fh))
+    # H.264 plays in browsers (the web UI) and QuickTime; fall back to MPEG-4 Part 2 if unavailable
+    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"avc1"), FPS, (fw, fh))
+    if not writer.isOpened():
+        writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), FPS, (fw, fh))
 
     ball_trail = deque(maxlen=12)
     t0 = time.time()

@@ -38,7 +38,7 @@ detect (cached) → track (BoT-SORT) → PTZ camera calibration → pitch coordi
 | Team assignment | 82% | **97.6%** |
 | Goalkeeper precision / recall | 27% / — | **90% / 84%** |
 | Ball within 10 px | 46% | **77%** |
-| Calibration: players projected at the right height (±25%) | — | **92%** |
+| Calibration: players projected at the right height (±25%) | — | **94%** |
 | Distance covered, median error | — | **6.7%** |
 | Pass F1 / turnover F1 | — | 0.65 / 0.54 |
 
@@ -251,11 +251,17 @@ Build one understandable component at a time, verify its output, then connect it
 
 ---
 
-## Running the Dashboard (Phase 14)
+## Web app
 
-Once all pipeline phases have been executed and the `outputs/` folder is populated, you can launch the interactive web dashboard to explore the match analytics:
+Double-click **`FootVision.command`** in Finder: the app opens in your browser (close the Terminal window
+that appears to stop it). Or run `.venv/bin/streamlit run app.py`.
 
-```bash
-streamlit run app.py
-```
-Open the provided `localhost` URL in your browser.
+| Page | What you can do |
+|---|---|
+| **Match** | Watch the annotated video, scrub player and ball positions on a 2D pitch, see possession per second, passes, turnovers and player statistics for any analysed clip |
+| **Analyse a clip** | Pick a SoccerNet clip or upload your own video, run the whole pipeline with one button, follow live progress; optionally render the video and score against ground truth |
+| **Accuracy** | Scores against SoccerNet ground truth in plain language; compare two runs side by side; sort clips to find the weakest |
+| **Calibration** | Scrub through a clip with the projected pitch drawn on each frame, per-frame calibration confidence and zoom |
+
+Analyses run in the background (`runs/ui_jobs/`), so they keep going if you switch pages or close the tab.
+Results go to `outputs_ui/` by default.

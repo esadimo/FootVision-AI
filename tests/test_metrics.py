@@ -64,3 +64,16 @@ def test_ball(seq):
     assert r["ball_recall"] == 1.0 and r["ball_precision"] == 1.0
     b.loc[b.frame > 5, "x"] = 900
     assert evaluate_ball(seq, b)["ball_recall"] == pytest.approx(0.5)
+
+
+def test_calibration_keeper_check_flags_shifted_pitch():
+    import pandas as pd
+    from src.evaluation.metrics import calibration_keeper_check
+    # identity homography: image px == pitch metres; keeper feet at x = 3 m (near goal) or 40 m (shifted)
+    gt = pd.DataFrame({"frame": [1, 6], "role": "goalkeeper", "x1": [2.0, 2.0], "x2": [4.0, 4.0],
+                       "y1": [20.0, 20.0], "y2": [30.0, 30.0]})
+    H = [np.eye(3)] * 6
+    assert calibration_keeper_check(H, gt)["keeper_ok"] == 1.0
+    shifted = [np.array([[1, 0, 37.0], [0, 1, 0], [0, 0, 1]])] * 6
+    r = calibration_keeper_check(shifted, gt)
+    assert r["keeper_ok"] == 0.0 and abs(r["keeper_goal_dist_med"] - 40.0) < 1e-6

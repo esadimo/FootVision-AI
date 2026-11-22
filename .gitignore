@@ -100,3 +100,7 @@ outputs_test_v2/
 outputs_test_v3/
 outputs_v2/
 outputs_test_v4/
+outputs_test_v5/
+outputs_ui/
+outputs/*_web.mp4
+.claude/

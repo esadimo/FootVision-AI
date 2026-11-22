@@ -21,7 +21,8 @@ import pandas as pd
 
 from src.analytics.match_analytics import (EventParams, control_per_frame, player_stats, possession_and_events,
                                            possession_share, smooth_tracks, team_shape)
-from src.calibration.camera_model import calibrate_sequence, pitch_error_m, _cues_for
+from src.calibration.camera_model import (_cues_for, _fit_frame, calibrate_sequence, pitch_error_m,
+                                          repair_calibration)
 from src.data.soccernet import Sequence
 from src.pipeline.detect_track import BALL_CLASS, PERSON_CLASSES, dets_to_frame, load_or_detect, track_cached
 from src.pipeline.roles_teams import assign_roles_and_teams
@@ -53,6 +54,7 @@ class PipelineConfig:
     split: SplitParams = field(default_factory=SplitParams)
     ball_zoom: bool = True            # second detection pass on a crop around the expected ball
     calib_cache: bool = True
+    calib_repair: bool = True         # self-check + repair of drifted frames (also upgrades cached calibrations)
 
 
 def _frame_reader(seq: Sequence):
@@ -69,14 +71,28 @@ def _frame_reader(seq: Sequence):
 
 def calibrate(seq: Sequence, dets: Dict, cfg: PipelineConfig, out_dir: str, log=print):
     path = os.path.join(out_dir, "calibration.json")
-    if cfg.calib_cache and os.path.exists(path):
-        d = json.load(open(path))
-        return {i + 1: np.array(h) for i, h in enumerate(d["H"])}, d
     df = dets_to_frame(dets)
     m = df[df.cls.isin(PERSON_CLASSES) & (df.conf >= cfg.mask_conf)]
     boxes = {int(f): g[["x1", "y1", "x2", "y2"]].to_numpy(float) for f, g in m.groupby("frame")}
+    if cfg.calib_cache and os.path.exists(path):
+        d = json.load(open(path))
+        if cfg.calib_repair and not d.get("repaired"):
+            # calibration cached before the repair stage existed: repair it in place
+            C = np.asarray(d["camera_centre"], float)
+            L, W = d.get("pitch", [105.0, 68.0])
+            cues = [_cues_for(cv2.imread(p), boxes.get(i + 1)) for i, p in enumerate(seq.frame_paths)]
+            cams = [_fit_frame(np.array(h), C, cues[i], L, W) for i, h in enumerate(d["H"])]
+            cams, infos = repair_calibration(seq.frame_paths, cams, [{} for _ in cams], boxes, cues, C, verbose=False)
+            d["H"] = [c.H().tolist() for c in cams]
+            d["focal"] = [c.f for c in cams]
+            d["self_check"] = [x.get("self_check") for x in infos]
+            d["repaired_frames"] = int(sum(1 for x in infos if x.get("repaired")))
+            d["repaired"] = True
+            json.dump(d, open(path, "w"))
+            log(f"  calibration repaired: {d['repaired_frames']} frames replaced")
+        return {i + 1: np.array(h) for i, h in enumerate(d["H"])}, d
     H0 = np.array(json.load(open(cfg.H_init))["keyframes"][0]["H"]) if cfg.H_init else None
-    cams, infos = calibrate_sequence(seq.frame_paths, H0, boxes, verbose=True)
+    cams, infos = calibrate_sequence(seq.frame_paths, H0, boxes, verbose=True, repair=cfg.calib_repair)
     # quality report on a sample of frames
     errs = []
     for i in range(0, seq.n_frames, 25):
@@ -85,11 +101,23 @@ def calibrate(seq: Sequence, dets: Dict, cfg: PipelineConfig, out_dir: str, log=
     q = pd.DataFrame(errs).median().to_dict()
     d = {"H": [c.H().tolist() for c in cams], "camera_centre": cams[0].C.tolist(),
          "pitch": [cams[0].L, cams[0].W], "focal": [c.f for c in cams],
-         "line_in3": [x.get("in3") for x in infos], "quality": q}
+         "line_in3": [x.get("in3") for x in infos], "quality": q,
+         "self_check": [x.get("self_check") for x in infos],
+         "repaired_frames": int(sum(1 for x in infos if x.get("repaired"))), "repaired": cfg.calib_repair}
     json.dump(d, open(path, "w"))
     log(f"  calibration: median line error {q.get('err_med_m', float('nan')):.3f} m, "
         f"{100 * q.get('within_0.5m', float('nan')):.1f}% within 0.5 m")
     return {i + 1: np.array(h) for i, h in enumerate(d["H"])}, d
+
+
+def calibration_confidence(calib: Dict, bad: float = 0.5, low_share: float = 0.2) -> Dict:
+    """Ground-truth-free calibration confidence from the per-frame people-size self-check."""
+    sc = np.array([np.nan if v is None else v for v in calib.get("self_check", [])], float)
+    if not len(sc) or np.isnan(sc).all():
+        return {"calibration_self_check": None, "calibration_flagged_share": None, "calibration_low_confidence": None}
+    flagged = float(np.mean(np.nan_to_num(sc, nan=1.0) < bad))
+    return {"calibration_self_check": round(float(np.nanmean(sc)), 3), "calibration_flagged_share": round(flagged, 3),
+            "calibration_low_confidence": flagged > low_share}
 
 
 def run_sequence(seq_dir: str, out_root: str = "outputs", cfg: PipelineConfig = PipelineConfig(),
@@ -160,6 +188,7 @@ def run_sequence(seq_dir: str, out_root: str = "outputs", cfg: PipelineConfig = 
                "n_tracks": int(sm.track_id.nunique()), "n_passes": int((events.event_type == "Pass").sum()) if len(events) else 0,
                "n_turnovers": int((events.event_type == "Turnover").sum()) if len(events) else 0,
                "ball_frames_known": int(ball.x.notna().sum()), "calibration_quality": calib.get("quality"),
+               **calibration_confidence(calib),
                "camera_centre": calib.get("camera_centre"), "pitch_dims": calib.get("pitch")}
     json.dump(summary, open(os.path.join(out_dir, "summary.json"), "w"), indent=2)
     if legacy:

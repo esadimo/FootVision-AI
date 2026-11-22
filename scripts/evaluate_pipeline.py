@@ -25,7 +25,8 @@ sys.path.insert(0, project_root)
 from src.analytics.match_analytics import (control_per_frame, possession_and_events, possession_share,  # noqa: E402
                                            smooth_tracks)
 from src.data.soccernet import Sequence  # noqa: E402
-from src.evaluation.metrics import (_matched_pairs, calibration_height_check, evaluate_ball,  # noqa: E402
+from src.evaluation.metrics import (_matched_pairs, calibration_height_check, calibration_keeper_check,  # noqa: E402
+                                    evaluate_ball,
                                     evaluate_roles, evaluate_teams, evaluate_tracking, gt_ball)
 from src.tracking.stitching import foot_points_pitch  # noqa: E402
 
@@ -84,6 +85,8 @@ def evaluate(seq_dir: str, run_root: str, event_params=None) -> dict:
     out["calib_within_0.5m"] = cal["quality"].get("within_0.5m")
     # GT-based calibration check (person height / feet on pitch) — independent of the line detector
     out.update({f"calib_{k}": v for k, v in calibration_height_check(cal["H"], pd.DataFrame(seq.gt)).items()})
+    out.update({f"calib_{k}": v for k, v in
+                calibration_keeper_check(cal["H"], pd.DataFrame(seq.gt), cal.get("pitch", [105.0])[0]).items()})
 
     # map GT left/right to predicted A/B by majority over matched detections
     m = _matched_pairs(seq, tr)

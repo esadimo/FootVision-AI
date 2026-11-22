@@ -23,7 +23,7 @@ import pandas as pd
 from src.calibration.camera_model import _cues_for, calibrate_sequence, get_template, pitch_error_m
 from src.calibration.line_tracker import _project, line_mask
 from src.data.soccernet import Sequence
-from src.evaluation.metrics import calibration_height_check
+from src.evaluation.metrics import calibration_height_check, calibration_keeper_check
 
 
 def check(seq_dir: str, out: str) -> dict:
@@ -45,6 +45,7 @@ def check(seq_dir: str, out: str) -> dict:
            "frames_bad": int(((e.err_med_m > 1.0) | (e.clutter > 0.5)).sum()), "n_sampled": len(e)}
     # ground-truth check independent of the line detector (see calibration_height_check)
     res.update({k: round(v, 3) for k, v in calibration_height_check([c.H() for c in cams], g).items()})
+    res.update({k: round(v, 3) for k, v in calibration_keeper_check([c.H() for c in cams], g, cams[0].L).items()})
     json.dump([c.H().tolist() for c in cams], open(os.path.join(out, seq.name + ".json"), "w"))
     strip = []
     for i in np.linspace(0, seq.n_frames - 1, 4).astype(int):
